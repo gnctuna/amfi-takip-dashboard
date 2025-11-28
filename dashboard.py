@@ -3,21 +3,19 @@ import pandas as pd
 import paho.mqtt.client as mqtt
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta # <-- SAAT AYARI İÇİN EKLENDİ
 import queue
-import os # Dosya işlemleri için
+import os 
 
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
-CSV_FILE = "history.csv" # Verilerin saklanacağı dosya
+CSV_FILE = "history.csv" 
 
 st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide")
-st.title("🏫 Akıllı Amfi Takip Sistemi (Kalıcı Hafıza)")
+st.title("🏫 Akıllı Amfi Takip Sistemi (İstanbul)")
 
-# --- 1. GEÇMİŞ VERİLERİ YÜKLE ---
-# Site açılır açılmaz CSV dosyasını okur ve grafiği çizer.
-# MQTT bağlı olmasa bile burası çalışır.
+# --- VERİLERİ YÜKLE ---
 def load_data():
     if os.path.exists(CSV_FILE):
         try:
@@ -27,7 +25,6 @@ def load_data():
     else:
         return pd.DataFrame(columns=['Saat', 'Tarih', 'Kişi', 'Durum'])
 
-# Veriyi RAM'e al
 if 'history_df' not in st.session_state:
     st.session_state.history_df = load_data()
 
@@ -38,7 +35,7 @@ def get_message_queue():
 
 data_queue = get_message_queue()
 
-# --- MQTT AYARLARI ---
+# --- MQTT ---
 def on_message(client, userdata, message):
     try:
         payload = json.loads(message.payload.decode())
@@ -56,56 +53,49 @@ def start_mqtt():
     client.loop_start()
     return client
 
-# MQTT Başlat
 start_mqtt()
 
-# --- ARAYÜZ YER TUTUCULARI ---
+# --- ARAYÜZ ---
 metric_col = st.empty()
 chart_col = st.empty()
 info_box = st.empty()
 
-# --- İLK ÇİZİM (MQTT BEKLEMEDEN) ---
-# Eğer geçmiş veri varsa hemen ekrana bas
+# İlk Yükleme Gösterimi
 if not st.session_state.history_df.empty:
     last_row = st.session_state.history_df.iloc[-1]
-    
     with metric_col.container():
         c1, c2, c3 = st.columns(3)
         c1.metric("Son Bilinen Kişi", last_row['Kişi'])
         c2.metric("Tarih", f"{last_row['Tarih']} {last_row['Saat']}")
         status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
         c3.metric("Son Durum", f"{last_row['Durum']} {status_icon}")
-    
-    # Grafiği çiz (Sadece Kişi sayısı)
     st.subheader("📊 Değişim Grafiği")
     chart_col.line_chart(st.session_state.history_df.set_index("Saat")['Kişi'])
 else:
-    info_box.info("Henüz geçmiş veri yok. Sistem ilk veriyi bekliyor...")
+    info_box.info("Sistem İstanbul saatiyle verileri bekliyor...")
 
 # --- ANA DÖNGÜ ---
 while True:
-    # Kuyrukta yeni veri var mı?
     while not data_queue.empty():
         payload = data_queue.get()
-        
         new_count = payload['occupancy']
-        current_time = datetime.now().strftime('%H:%M:%S')
-        current_date = datetime.now().strftime('%Y-%m-%d')
         status = payload.get('status', 'Normal')
 
-        # --- KRİTİK NOKTA: DEĞİŞİM KONTROLÜ ---
-        # Sadece sayı değiştiyse kaydet
+        # --- TÜRKİYE SAATİ AYARI (UTC+3) ---
+        tr_now = datetime.now() + timedelta(hours=3)
+        current_time = tr_now.strftime('%H:%M:%S')
+        current_date = tr_now.strftime('%Y-%m-%d')
+
+        # Değişim Kontrolü
         should_save = False
-        
         if st.session_state.history_df.empty:
-            should_save = True # İlk veriyi kesin kaydet
+            should_save = True
         else:
             last_count = st.session_state.history_df.iloc[-1]['Kişi']
             if new_count != last_count:
-                should_save = True # Sayı değişti, kaydet!
+                should_save = True
         
         if should_save:
-            # 1. Yeni satırı oluştur
             new_data = {
                 "Saat": current_time,
                 "Tarih": current_date,
@@ -113,30 +103,21 @@ while True:
                 "Durum": status
             }
             new_row_df = pd.DataFrame([new_data])
-            
-            # 2. RAM'deki listeye ekle
             st.session_state.history_df = pd.concat([st.session_state.history_df, new_row_df], ignore_index=True)
             
-            # 3. CSV DOSYASINA YAZ (Kalıcı Hafıza)
-            # mode='a' (append) ile dosyanın sonuna ekleriz
-            # header=False (başlıkları tekrar yazmasın diye)
+            # CSV'ye Yaz
             write_header = not os.path.exists(CSV_FILE)
             new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
             
-            # 4. Arayüzü Güncelle
+            # Güncelle
             with metric_col.container():
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Anlık Kişi", new_count, delta="Değişim Var 🔔")
-                c2.metric("Saat", current_time)
+                c2.metric("Saat (TR)", current_time)
                 icon = "🔴" if new_count > 15 else "🟢"
                 c3.metric("Durum", f"{status} {icon}")
 
             chart_col.line_chart(st.session_state.history_df.set_index("Saat")['Kişi'])
-            info_box.success(f"Yeni kayıt eklendi: {current_time} -> {new_count} Kişi")
-            
-        else:
-            # Sayı değişmediyse sadece bilgi ver, kaydetme
-            # info_box.info(f"Sayı sabit ({new_count}). Kayıt yapılmadı.") 
-            pass
+            info_box.success(f"Kayıt Eklendi: {current_time}")
 
     time.sleep(1)
