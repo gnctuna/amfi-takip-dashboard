@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pt
+*.mp4
+dataset/
+models/
+gereksizler kısmı/
+.DS_Store
+history_v2.csv
