@@ -3,14 +3,15 @@ import pandas as pd
 import paho.mqtt.client as mqtt
 import json
 import time
-from datetime import datetime, timedelta # <-- SAAT AYARI İÇİN EKLENDİ
+from datetime import datetime, timedelta
 import queue
 import os 
 
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
-CSV_FILE = "history.csv" 
+# İSMİNİ DEĞİŞTİRDİK -> SIFIRLAMA İÇİN
+CSV_FILE = "history_v2.csv" 
 
 st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide")
 st.title("🏫 Akıllı Amfi Takip Sistemi (İstanbul)")
@@ -21,9 +22,9 @@ def load_data():
         try:
             return pd.read_csv(CSV_FILE)
         except:
-            return pd.DataFrame(columns=['Saat', 'Tarih', 'Kişi', 'Durum'])
+            return pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
     else:
-        return pd.DataFrame(columns=['Saat', 'Tarih', 'Kişi', 'Durum'])
+        return pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
 if 'history_df' not in st.session_state:
     st.session_state.history_df = load_data()
@@ -66,13 +67,16 @@ if not st.session_state.history_df.empty:
     with metric_col.container():
         c1, c2, c3 = st.columns(3)
         c1.metric("Son Bilinen Kişi", last_row['Kişi'])
-        c2.metric("Tarih", f"{last_row['Tarih']} {last_row['Saat']}")
+        # Artık tek bir ZAMAN bilgisi var
+        c2.metric("Son Güncelleme", last_row['Zaman'])
         status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
         c3.metric("Son Durum", f"{last_row['Durum']} {status_icon}")
-    st.subheader("📊 Değişim Grafiği")
-    chart_col.line_chart(st.session_state.history_df.set_index("Saat")['Kişi'])
+    
+    st.subheader("📊 Zaman ve Tarih Grafiği")
+    # Grafikte artık ZAMAN sütununu kullanıyoruz
+    chart_col.line_chart(st.session_state.history_df.set_index("Zaman")['Kişi'])
 else:
-    info_box.info("Sistem İstanbul saatiyle verileri bekliyor...")
+    info_box.info("Veritabanı sıfırlandı (v2). Yeni veri bekleniyor...")
 
 # --- ANA DÖNGÜ ---
 while True:
@@ -83,8 +87,8 @@ while True:
 
         # --- TÜRKİYE SAATİ AYARI (UTC+3) ---
         tr_now = datetime.now() + timedelta(hours=3)
-        current_time = tr_now.strftime('%H:%M:%S')
-        current_date = tr_now.strftime('%Y-%m-%d')
+        # HEM TARİH HEM SAATİ BİRLEŞTİRİYORUZ
+        full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
 
         # Değişim Kontrolü
         should_save = False
@@ -97,8 +101,7 @@ while True:
         
         if should_save:
             new_data = {
-                "Saat": current_time,
-                "Tarih": current_date,
+                "Zaman": full_time_str, # Tek sütunda birleştirdik
                 "Kişi": new_count,
                 "Durum": status
             }
@@ -113,11 +116,12 @@ while True:
             with metric_col.container():
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Anlık Kişi", new_count, delta="Değişim Var 🔔")
-                c2.metric("Saat (TR)", current_time)
+                c2.metric("Zaman (TR)", full_time_str)
                 icon = "🔴" if new_count > 15 else "🟢"
                 c3.metric("Durum", f"{status} {icon}")
 
-            chart_col.line_chart(st.session_state.history_df.set_index("Saat")['Kişi'])
-            info_box.success(f"Kayıt Eklendi: {current_time}")
+            # Grafiği güncelle
+            chart_col.line_chart(st.session_state.history_df.set_index("Zaman")['Kişi'])
+            info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
     time.sleep(1)
