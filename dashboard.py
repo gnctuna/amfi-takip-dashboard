@@ -10,10 +10,21 @@ import os
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
-# İSMİNİ DEĞİŞTİRDİK -> SIFIRLAMA İÇİN
 CSV_FILE = "history_v2.csv" 
 
 st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide")
+
+# --- YAN MENÜ (SIDEBAR) ---
+# Ayarları buraya alıyoruz ki ana ekran karışmasın
+with st.sidebar:
+    st.header("⚙️ Panel Ayarları")
+    st.write("Grafikte ne kadar geçmişi görmek istersin?")
+    # Slider artık solda duracak
+    zoom_level = st.slider("Veri Adedi (Zoom)", min_value=10, max_value=200, value=20)
+    
+    st.divider()
+    st.info("Bu sistem MQTT üzerinden anlık veri alır.")
+
 st.title("🏫 Akıllı Amfi Takip Sistemi (İstanbul)")
 
 # --- VERİLERİ YÜKLE ---
@@ -56,27 +67,28 @@ def start_mqtt():
 
 start_mqtt()
 
-# --- ARAYÜZ ---
+# --- ARAYÜZ YER TUTUCULARI ---
 metric_col = st.empty()
+st.subheader("📊 Canlı Değişim Grafiği")
 chart_col = st.empty()
 info_box = st.empty()
 
-# İlk Yükleme Gösterimi
+# --- İLK YÜKLEME (ESKİ VERİLER VARSA) ---
 if not st.session_state.history_df.empty:
+    # Veriyi kesip (tail) öyle gösteriyoruz
+    visible_df = st.session_state.history_df.tail(zoom_level)
     last_row = st.session_state.history_df.iloc[-1]
+    
     with metric_col.container():
         c1, c2, c3 = st.columns(3)
         c1.metric("Son Bilinen Kişi", last_row['Kişi'])
-        # Artık tek bir ZAMAN bilgisi var
         c2.metric("Son Güncelleme", last_row['Zaman'])
         status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
         c3.metric("Son Durum", f"{last_row['Durum']} {status_icon}")
     
-    st.subheader("📊 Zaman ve Tarih Grafiği")
-    # Grafikte artık ZAMAN sütununu kullanıyoruz
-    chart_col.line_chart(st.session_state.history_df.set_index("Zaman")['Kişi'])
+    chart_col.line_chart(visible_df.set_index("Zaman")['Kişi'])
 else:
-    info_box.info("Veritabanı sıfırlandı (v2). Yeni veri bekleniyor...")
+    info_box.info("Veri bekleniyor...")
 
 # --- ANA DÖNGÜ ---
 while True:
@@ -85,9 +97,8 @@ while True:
         new_count = payload['occupancy']
         status = payload.get('status', 'Normal')
 
-        # --- TÜRKİYE SAATİ AYARI (UTC+3) ---
+        # Saat Ayarı
         tr_now = datetime.now() + timedelta(hours=3)
-        # HEM TARİH HEM SAATİ BİRLEŞTİRİYORUZ
         full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
 
         # Değişim Kontrolü
@@ -101,18 +112,19 @@ while True:
         
         if should_save:
             new_data = {
-                "Zaman": full_time_str, # Tek sütunda birleştirdik
+                "Zaman": full_time_str,
                 "Kişi": new_count,
                 "Durum": status
             }
             new_row_df = pd.DataFrame([new_data])
             st.session_state.history_df = pd.concat([st.session_state.history_df, new_row_df], ignore_index=True)
             
-            # CSV'ye Yaz
             write_header = not os.path.exists(CSV_FILE)
             new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
             
-            # Güncelle
+            # GÖSTERİLECEK VERİYİ KES (ZOOM AYARINA GÖRE)
+            visible_df = st.session_state.history_df.tail(zoom_level)
+            
             with metric_col.container():
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Anlık Kişi", new_count, delta="Değişim Var 🔔")
@@ -120,8 +132,9 @@ while True:
                 icon = "🔴" if new_count > 15 else "🟢"
                 c3.metric("Durum", f"{status} {icon}")
 
-            # Grafiği güncelle
-            chart_col.line_chart(st.session_state.history_df.set_index("Zaman")['Kişi'])
+            # Kesilmiş veriyi grafiğe bas
+            chart_col.line_chart(visible_df.set_index("Zaman")['Kişi'])
+            
             info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
     time.sleep(1)
