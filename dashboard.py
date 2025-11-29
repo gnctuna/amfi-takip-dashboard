@@ -16,6 +16,16 @@ MAX_DISPLAY_ROWS = 5000
 
 st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide")
 
+# --- ÖZEL CSS (SCROLLBAR GÖRÜNÜMÜ İÇİN) ---
+st.markdown("""
+<style>
+    /* Grafik alanının altına şık bir scrollbar ekler */
+    div[data-testid="stVerticalBlock"] > div:has(iframe) {
+        overflow-x: auto;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- GLOBAL POSTA KUTUSU VE MQTT ---
 @st.cache_resource
 def get_message_queue():
@@ -51,54 +61,48 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- YENİ GRAFİK FONKSİYONU (AKILLI ODAKLANMA) ---
+# --- YENİ GRAFİK FONKSİYONU (SCROLLBAR MODU) ---
 def plot_interactive_chart(df):
     if df.empty: return None
     
-    # 1. Eşit Aralıklar İçin İndeks Kullanıyoruz
+    # 1. GENİŞLİK AYARI:
+    # Her bir veri noktası için 40 piksel yer ayırıyoruz.
+    # Veri arttıkça grafik sağa doğru uzayacak.
+    POINT_WIDTH_PX = 40
+    # En az 1000 piksel olsun, veri çoksa uzasın.
+    dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
+
     fig = px.line(
         df, 
         x=df.index, 
         y="Kişi", 
-        title="Zaman İçindeki Kişi Sayısı Değişimi", 
         markers=True,
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
-    # 2. BAŞLANGIÇ ODAĞINI AYARLA
-    # Grafiği açtığında tüm 5000 veriyi göstermesin, sıkışır.
-    # Sadece son 20 veriye odaklansın. Geri kalanı için alttaki çubuk kullanılsın.
-    total_points = len(df)
-    start_view = max(0, total_points - 20) # Son 20 nokta
-    end_view = total_points
-    
-    fig.update_xaxes(
-        # X Ekseninde sadece var olan kayıtların tarihini göster
-        tickvals=df.index,
-        ticktext=df['Zaman'],
-        
-        # --- İŞTE SİHİRLİ DOKUNUŞ ---
-        # range: Başlangıçta hangi aralığın görüneceğini belirler.
-        range=[start_view, end_view], 
-        
-        # rangeslider: Alttaki kaydırma çubuğunu açar
-        rangeslider=dict(visible=True, thickness=0.10),
-        
-        type='category',
-        tickangle=-45 # Tarihleri çapraz yap (Telefonda üst üste binmesin)
-    )
-
     fig.update_layout(
-        xaxis_title="Zaman (Veri Kayıt Noktaları)",
+        xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
-        height=550,
-        # width parametresini sildik, çünkü artık zoom yaparak genişliyor!
-        margin=dict(l=20, r=20, t=50, b=20),
-        
-        # Telefonda rahat kullanım için sürükleme modu
-        dragmode="pan" 
+        height=500,
+        width=dynamic_width, # <--- Grafiği zorla genişletiyoruz
+        margin=dict(l=20, r=20, t=40, b=20),
+        dragmode="pan" # Sürükleme modu açık
     )
+
+    fig.update_xaxes(
+        tickvals=df.index,
+        ticktext=df['Zaman'],
+        tickangle=-45,
+        type='category',
+        
+        # --- ÖNEMLİ DEĞİŞİKLİKLER ---
+        rangeslider=dict(visible=False), # O küçük alt grafiği kapattık
+        fixedrange=True # X ekseninde ZOOM yapmayı yasakladık (Sıkışmayı önler)
+    )
+    
+    fig.update_yaxes(fixedrange=True) # Y ekseninde zoom yasak
+    
     return fig
 
 # --- ARAYÜZ ---
@@ -119,8 +123,10 @@ if not st.session_state.history_df.empty:
         c3.metric("Son Durum", f"{last_row['Durum']} {status_icon}")
     
     fig = plot_interactive_chart(st.session_state.history_df.copy())
-    # use_container_width=True yaparak ekran genişliğine tam oturmasını sağlıyoruz
-    chart_placeholder.plotly_chart(fig, use_container_width=True)
+    
+    # use_container_width=False YAPTIK!
+    # Bu sayede grafik ekrana sığışmaz, taşar ve scrollbar çıkar.
+    chart_placeholder.plotly_chart(fig, use_container_width=False)
     
     info_box.success("Sistem hazır.")
 else:
@@ -160,7 +166,7 @@ while True:
 
             # Grafiği güncelle
             fig = plot_interactive_chart(st.session_state.history_df.copy())
-            chart_placeholder.plotly_chart(fig, use_container_width=True)
+            chart_placeholder.plotly_chart(fig, use_container_width=False)
             
             info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
