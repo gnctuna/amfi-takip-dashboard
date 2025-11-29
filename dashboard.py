@@ -6,30 +6,21 @@ import time
 from datetime import datetime, timedelta
 import queue
 import os 
-import plotly.express as px # Plotly kütüphanesi
+import plotly.express as px
 
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
-# VERİ SIFIRLAMA İÇİN YENİ DOSYA ADI
 CSV_FILE = "history_v3.csv" 
-MAX_DISPLAY_ROWS = 5000 # Grafikte maksimum yüklenecek satır sayısı
+MAX_DISPLAY_ROWS = 5000 
 
 st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide")
-st.title("🏫 Akıllı Amfi Takip Sistemi (İstanbul)")
 
-# --- GLOBAL POSTA KUTUSU VE VERİ HAFIZASI ---
+# --- GLOBAL POSTA KUTUSU VE MQTT ---
 @st.cache_resource
 def get_message_queue():
-    # MQTT robotunun veri atacağı yer
     return queue.Queue()
 
-data_queue = get_message_queue()
-
-if 'history_df' not in st.session_state:
-    st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
-
-# --- FONKSİYONLAR ---
 @st.cache_resource
 def start_mqtt():
     def on_message(client, userdata, message):
@@ -47,56 +38,81 @@ def start_mqtt():
     client.loop_start()
     return client
 
+data_queue = get_message_queue()
+start_mqtt()
+
+# --- VERİ LİSTESİNİ YÜKLE ---
+if 'history_df' not in st.session_state:
+    if os.path.exists(CSV_FILE):
+        try:
+            # CSV dosyasını oku ve son 5000 satırı al
+            st.session_state.history_df = pd.read_csv(CSV_FILE).tail(MAX_DISPLAY_ROWS)
+        except:
+            st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
+    else:
+        st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
+
+# --- GRAFİK FONKSİYONU (DİNAMİK GENİŞLİK) ---
 def plot_interactive_chart(df):
     if df.empty: return None
     
-    # KATEGORİK EKSEN (x=df.index) ile zaman aralığı ne olursa olsun eşit mesafe sağlar
+    # Genişliği Hesapla: Her veri noktası için 60 piksel ayır + 500px kenar payı
+    # Bu sayede veri arttıkça grafik sıkışmaz, uzar.
+    POINT_WIDTH = 60
+    chart_width = len(df) * POINT_WIDTH + 500 
+
     fig = px.line(
         df, 
-        x=df.index, # X eksenine sıralı satır indexi verir
+        x=df.index, # Eşit aralıklar için index kullanıyoruz
         y="Kişi", 
         title="Zaman İçindeki Kişi Sayısı Değişimi", 
         markers=True,
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
-    # X ekseninde sadece veri olan noktaların zamanını yazdır
-    fig.update_xaxes(
-        tickvals=df.index,
-        ticktext=df['Zaman'], 
-        rangeslider=dict(visible=True, thickness=0.08), 
-        type='category' # Kategorik tip, aralıkları eşit yapar
-    )
-
     fig.update_layout(
         xaxis_title="Zaman (Veri Kayıt Noktaları)",
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
-        height=500
+        height=500,
+        width=chart_width, # Genişliği zorla ayarla
+        xaxis=dict(
+            rangeslider=dict(visible=True, thickness=0.08), 
+            type='category',
+            tickvals=df.index,
+            ticktext=df['Zaman'],
+        )
     )
     return fig
 
-# --- İLK YÜKLEME VE ÇALIŞTIRMA ---
-start_mqtt()
-
-# Eğer dosya varsa yükle (Kalici hafiza)
-if os.path.exists(CSV_FILE):
-    try:
-        loaded_df = pd.read_csv(CSV_FILE)
-        # Sadece Max_Rows kadarını al ve RAM'e yükle (Performans için)
-        st.session_state.history_df = loaded_df.tail(MAX_DISPLAY_ROWS) 
-    except:
-        pass
-
-# --- ARAYÜZ YER TUTUCULARI ---
-st.header("📊 Canlı Değişim Grafiği")
-chart_placeholder = st.empty()
+# --- ARAYÜZ ---
+st.subheader("📊 Canlı Değişim Grafiği")
 metric_col = st.empty()
+chart_placeholder = st.empty()
 info_box = st.empty()
 
-# --- ANA DÖNGÜ ---
+# --- 1. AÇILIŞTA EKRANI DOLDUR (BOŞ GÖRÜNMESİN) ---
+if not st.session_state.history_df.empty:
+    last_row = st.session_state.history_df.iloc[-1]
+    
+    # Metrikleri Göster
+    with metric_col.container():
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Son Bilinen Kişi", last_row['Kişi'])
+        c2.metric("Tarih", last_row['Zaman'])
+        status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
+        c3.metric("Son Durum", f"{last_row['Durum']} {status_icon}")
+    
+    # Grafiği Çiz
+    fig = plot_interactive_chart(st.session_state.history_df.copy())
+    chart_placeholder.plotly_chart(fig)
+    
+    info_box.success("Sistem hazır. Son bilinen veriler yüklendi.")
+else:
+    info_box.warning("Veritabanı boş. İlk verinin gönderilmesi bekleniyor...")
+
+# --- 2. ANA DÖNGÜ (YENİ VERİ BEKLE) ---
 while True:
-    # 1. Posta Kutusunu Boşalt
     while not data_queue.empty():
         payload = data_queue.get()
         new_count = payload['occupancy']
@@ -116,18 +132,16 @@ while True:
                 should_save = True
         
         if should_save:
-            # Yeni veriyi hazırla
             new_data = {"Zaman": full_time_str, "Kişi": new_count, "Durum": status}
             new_row_df = pd.DataFrame([new_data])
             
-            # RAM'deki listeye ekle
             st.session_state.history_df = pd.concat([st.session_state.history_df, new_row_df], ignore_index=True)
             
-            # CSV'ye Yaz (Kalıcı Hafıza)
+            # CSV'ye Yaz
             write_header = not os.path.exists(CSV_FILE)
             new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
             
-            # --- EKRANI GÜNCELLE ---
+            # Güncelle
             with metric_col.container():
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Anlık Kişi", new_count, delta="Değişim Var 🔔")
@@ -137,7 +151,7 @@ while True:
 
             # Grafiği güncelle
             fig = plot_interactive_chart(st.session_state.history_df.copy())
-            chart_placeholder.plotly_chart(fig, use_container_width=True)
+            chart_placeholder.plotly_chart(fig)
             
             info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
