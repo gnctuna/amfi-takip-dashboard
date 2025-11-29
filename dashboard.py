@@ -51,53 +51,45 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- YENİ GRAFİK FONKSİYONU (AKILLI ODAKLANMA) ---
+# --- GRAFİK FONKSİYONU (SADELEŞTİRİLMİŞ) ---
 def plot_interactive_chart(df):
     if df.empty: return None
     
-    # 1. Eşit Aralıklar İçin İndeks Kullanıyoruz
+    # 1. Çizim
     fig = px.line(
         df, 
         x=df.index, 
         y="Kişi", 
         title="Zaman İçindeki Kişi Sayısı Değişimi", 
         markers=True,
+        # Hover (Baloncuk) içinde Zaman görünmeye devam edecek!
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
-    # 2. BAŞLANGIÇ ODAĞINI AYARLA
-    # Grafiği açtığında tüm 5000 veriyi göstermesin, sıkışır.
-    # Sadece son 20 veriye odaklansın. Geri kalanı için alttaki çubuk kullanılsın.
+    # 2. BAŞLANGIÇ ODAĞI (SON 20 VERİ)
     total_points = len(df)
-    start_view = max(0, total_points - 20) # Son 20 nokta
+    start_view = max(0, total_points - 20) 
     end_view = total_points
     
     fig.update_xaxes(
-        # X Ekseninde sadece var olan kayıtların tarihini göster
+        # --- BURASI DEĞİŞTİ ---
+        showticklabels=False, # Eksen üzerindeki yazıları GİZLE
+        title_text="",        # Eksen başlığını da (Zaman) kaldır
+        
         tickvals=df.index,
-        ticktext=df['Zaman'],
-        
-        # --- İŞTE SİHİRLİ DOKUNUŞ ---
-        # range: Başlangıçta hangi aralığın görüneceğini belirler.
-        range=[start_view, end_view], 
-        
-        # rangeslider: Alttaki kaydırma çubuğunu açar
+        # Alttaki kaydırma çubuğu (mini-harita) açık kalsın
         rangeslider=dict(visible=True, thickness=0.10),
-        
-        type='category',
-        tickangle=-45 # Tarihleri çapraz yap (Telefonda üst üste binmesin)
+        range=[start_view, end_view], 
+        type='category'
     )
 
     fig.update_layout(
-        xaxis_title="Zaman (Veri Kayıt Noktaları)",
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
         height=550,
-        # width parametresini sildik, çünkü artık zoom yaparak genişliyor!
         margin=dict(l=20, r=20, t=50, b=20),
-        
-        # Telefonda rahat kullanım için sürükleme modu
-        dragmode="pan" 
+        dragmode="pan",
+        hovermode="x unified" # Mouse hizasındaki çizgiyi gösterir
     )
     return fig
 
@@ -119,7 +111,6 @@ if not st.session_state.history_df.empty:
         c3.metric("Son Durum", f"{last_row['Durum']} {status_icon}")
     
     fig = plot_interactive_chart(st.session_state.history_df.copy())
-    # use_container_width=True yaparak ekran genişliğine tam oturmasını sağlıyoruz
     chart_placeholder.plotly_chart(fig, use_container_width=True)
     
     info_box.success("Sistem hazır.")
