@@ -51,14 +51,15 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- YENİ GRAFİK FONKSİYONU ---
+# --- GRAFİK FONKSİYONU ---
 def create_figure(df):
     if df.empty: return None
     
-    # GENİŞLİK HESABI: Her veriye 40 piksel.
-    # Bu grafik ne kadar veri varsa o kadar uzar.
+    # GENİŞLİK HESABI: 
+    # Her veriye 40 piksel veriyoruz. 
+    # Veri arttıkça bu sayı 5000px, 10000px diye artacak.
     POINT_WIDTH_PX = 40
-    dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
+    dynamic_width = max(1200, len(df) * POINT_WIDTH_PX)
 
     fig = px.line(
         df, 
@@ -69,15 +70,13 @@ def create_figure(df):
     )
     
     fig.update_layout(
-        xaxis_title="", # Başlıkları kaldırdım daha temiz olsun
+        xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
-        height=450,
-        width=dynamic_width, # <--- Devasa genişlik burada ayarlanıyor
+        height=500,
+        width=dynamic_width, # <--- Grafiği zorla genişletiyoruz
         margin=dict(l=20, r=20, t=30, b=20),
-        dragmode=False, # Grafik içinde sürüklemeyi kapat (Scrollbar kullanılsın)
-        paper_bgcolor='rgba(0,0,0,0)', # Arkaplan şeffaf
-        plot_bgcolor='rgba(0,0,0,0)'
+        dragmode="pan"
     )
 
     fig.update_xaxes(
@@ -85,7 +84,7 @@ def create_figure(df):
         ticktext=df['Zaman'],
         tickangle=-45,
         type='category',
-        fixedrange=True # Zoom yapmayı yasakla
+        fixedrange=True # Zoom yapmayı yasakla (Sıkışmayı önler)
     )
     
     fig.update_yaxes(fixedrange=True)
@@ -97,8 +96,8 @@ st.subheader("📊 Canlı Değişim Grafiği")
 metric_col = st.empty()
 info_box = st.empty()
 
-# Grafik için tek bir HTML alanı ayırıyoruz
-chart_html_container = st.empty()
+# Grafik Kutusu
+chart_placeholder = st.empty()
 
 def render_dashboard():
     # 1. Metrikleri Güncelle
@@ -111,27 +110,14 @@ def render_dashboard():
             status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
             c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
-        # 2. Grafiği HTML Olarak Oluştur ve Bas
+        # 2. GRAFİĞİ ÇİZ (SİYAH EKRAN SORUNUNU ÇÖZEN KISIM)
         fig = create_figure(st.session_state.history_df)
         
-        # Grafiği HTML koduna çeviriyoruz (Zoom çubuğunu gizleyerek)
-        fig_html = fig.to_html(config={'displayModeBar': False, 'scrollZoom': False}, include_plotlyjs='cdn')
-        
-        # Bu HTML kutusu, içeriği taşarsa scrollbar çıkarır.
-        # overflow-x: auto -> Yatay scrollbar otomatik çıksın
-        chart_html_container.markdown(
-            f"""
-            <div style="
-                overflow-x: auto; 
-                border: 1px solid #333; 
-                border-radius: 5px; 
-                background-color: #0e1117;
-                padding-bottom: 10px;">
-                {fig_html}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        # use_container_width=False YAPIYORUZ!
+        # False olduğu için Streamlit grafiği ekrana sıkıştırmaz.
+        # Bizim verdiğimiz devasa genişliği (dynamic_width) kullanır.
+        # Ekrana sığmadığı için de OTOMATİK OLARAK altına scrollbar ekler.
+        chart_placeholder.plotly_chart(fig, use_container_width=False) 
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
@@ -165,7 +151,6 @@ while True:
             write_header = not os.path.exists(CSV_FILE)
             new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
             
-            # Ekrani Güncelle
             render_dashboard()
             info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
