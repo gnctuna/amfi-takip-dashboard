@@ -16,7 +16,7 @@ MAX_DISPLAY_ROWS = 5000
 
 st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide")
 
-# --- MQTT ALTYAPISI ---
+# --- GLOBAL POSTA KUTUSU VE MQTT ---
 @st.cache_resource
 def get_message_queue():
     return queue.Queue()
@@ -51,82 +51,82 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK FONKSİYONU ---
-def create_figure(df):
+# --- YENİ GRAFİK FONKSİYONU (AKILLI ODAKLANMA) ---
+def plot_interactive_chart(df):
     if df.empty: return None
     
-    # GENİŞLİK HESABI: 
-    # Her veriye 40 piksel veriyoruz. 
-    # Veri arttıkça bu sayı 5000px, 10000px diye artacak.
-    POINT_WIDTH_PX = 40
-    dynamic_width = max(1200, len(df) * POINT_WIDTH_PX)
-
+    # 1. Eşit Aralıklar İçin İndeks Kullanıyoruz
     fig = px.line(
         df, 
         x=df.index, 
         y="Kişi", 
+        title="Zaman İçindeki Kişi Sayısı Değişimi", 
         markers=True,
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
-    fig.update_layout(
-        xaxis_title="", 
-        yaxis_title="Kişi Sayısı",
-        template="plotly_dark",
-        height=500,
-        width=dynamic_width, # <--- Grafiği zorla genişletiyoruz
-        margin=dict(l=20, r=20, t=30, b=20),
-        dragmode="pan"
-    )
-
+    # 2. BAŞLANGIÇ ODAĞINI AYARLA
+    # Grafiği açtığında tüm 5000 veriyi göstermesin, sıkışır.
+    # Sadece son 20 veriye odaklansın. Geri kalanı için alttaki çubuk kullanılsın.
+    total_points = len(df)
+    start_view = max(0, total_points - 20) # Son 20 nokta
+    end_view = total_points
+    
     fig.update_xaxes(
+        # X Ekseninde sadece var olan kayıtların tarihini göster
         tickvals=df.index,
         ticktext=df['Zaman'],
-        tickangle=-45,
+        
+        # --- İŞTE SİHİRLİ DOKUNUŞ ---
+        # range: Başlangıçta hangi aralığın görüneceğini belirler.
+        range=[start_view, end_view], 
+        
+        # rangeslider: Alttaki kaydırma çubuğunu açar
+        rangeslider=dict(visible=True, thickness=0.10),
+        
         type='category',
-        fixedrange=True # Zoom yapmayı yasakla (Sıkışmayı önler)
+        tickangle=-45 # Tarihleri çapraz yap (Telefonda üst üste binmesin)
     )
-    
-    fig.update_yaxes(fixedrange=True)
-    
+
+    fig.update_layout(
+        xaxis_title="Zaman (Veri Kayıt Noktaları)",
+        yaxis_title="Kişi Sayısı",
+        template="plotly_dark",
+        height=550,
+        # width parametresini sildik, çünkü artık zoom yaparak genişliyor!
+        margin=dict(l=20, r=20, t=50, b=20),
+        
+        # Telefonda rahat kullanım için sürükleme modu
+        dragmode="pan" 
+    )
     return fig
 
-# --- ARAYÜZ YERLEŞİMİ ---
+# --- ARAYÜZ ---
 st.subheader("📊 Canlı Değişim Grafiği")
 metric_col = st.empty()
+chart_placeholder = st.empty()
 info_box = st.empty()
 
-# Grafik Kutusu
-chart_placeholder = st.empty()
-
-def render_dashboard():
-    # 1. Metrikleri Güncelle
-    if not st.session_state.history_df.empty:
-        last_row = st.session_state.history_df.iloc[-1]
-        with metric_col.container():
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Anlık Kişi", last_row['Kişi'])
-            c2.metric("Tarih", last_row['Zaman'])
-            status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
-            c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
-
-        # 2. GRAFİĞİ ÇİZ (SİYAH EKRAN SORUNUNU ÇÖZEN KISIM)
-        fig = create_figure(st.session_state.history_df)
-        
-        # use_container_width=False YAPIYORUZ!
-        # False olduğu için Streamlit grafiği ekrana sıkıştırmaz.
-        # Bizim verdiğimiz devasa genişliği (dynamic_width) kullanır.
-        # Ekrana sığmadığı için de OTOMATİK OLARAK altına scrollbar ekler.
-        chart_placeholder.plotly_chart(fig, use_container_width=False) 
-
-# --- İLK AÇILIŞ ---
+# --- 1. AÇILIŞ GÖSTERİMİ ---
 if not st.session_state.history_df.empty:
-    render_dashboard()
+    last_row = st.session_state.history_df.iloc[-1]
+    
+    with metric_col.container():
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Son Bilinen Kişi", last_row['Kişi'])
+        c2.metric("Tarih", last_row['Zaman'])
+        status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
+        c3.metric("Son Durum", f"{last_row['Durum']} {status_icon}")
+    
+    fig = plot_interactive_chart(st.session_state.history_df.copy())
+    # use_container_width=True yaparak ekran genişliğine tam oturmasını sağlıyoruz
+    chart_placeholder.plotly_chart(fig, use_container_width=True)
+    
     info_box.success("Sistem hazır.")
 else:
     info_box.warning("Veri bekleniyor...")
 
-# --- ANA DÖNGÜ ---
+# --- 2. ANA DÖNGÜ ---
 while True:
     while not data_queue.empty():
         payload = data_queue.get()
@@ -151,7 +151,17 @@ while True:
             write_header = not os.path.exists(CSV_FILE)
             new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
             
-            render_dashboard()
+            with metric_col.container():
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Anlık Kişi", new_count, delta="Değişim Var 🔔")
+                c2.metric("Zaman (TR)", full_time_str)
+                icon = "🔴" if new_count > 15 else "🟢"
+                c3.metric("Durum", f"{status} {icon}")
+
+            # Grafiği güncelle
+            fig = plot_interactive_chart(st.session_state.history_df.copy())
+            chart_placeholder.plotly_chart(fig, use_container_width=True)
+            
             info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
     time.sleep(1)
