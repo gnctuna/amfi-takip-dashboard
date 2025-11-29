@@ -16,37 +16,38 @@ MAX_DISPLAY_ROWS = 5000
 
 st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide")
 
-# --- ÖZEL CSS (GELENEKSEL SCROLLBAR İÇİN) ---
-# Bu CSS, grafiği bir kutu içine alır ve taşarsa
-# tarayıcının standart kaydırma çubuğunu çıkarır.
+# --- ÖZEL CSS (GELENEKSEL VE BELİRGİN SCROLLBAR) ---
 st.markdown("""
 <style>
+    /* Grafik Kutusu */
     .plotly-chart-container {
-        overflow-x: auto; /* Yatay taşmada standart scrollbar çıkar */
-        white-space: nowrap; /* İçeriği tek satırda tut */
-        padding-bottom: 10px; /* Scrollbar için biraz boşluk */
+        overflow-x: auto;       /* Yatay kaydırmaya izin ver */
+        padding-bottom: 15px;   /* Scrollbar için alt boşluk */
+        border: 1px solid #444; /* Çerçeve (Sınırları belli olsun) */
         border-radius: 5px;
-        border: 1px solid #333; /* İsteğe bağlı ince çerçeve */
+        background-color: #0e1117; /* Arkaplan rengi */
     }
-    /* Scrollbar'ı biraz daha belirgin yapalım (Webkit tarayıcılar için) */
+
+    /* Scrollbar Tasarımı (Chrome/Safari/Edge) */
     .plotly-chart-container::-webkit-scrollbar {
-        height: 12px;
+        height: 18px; /* Çubuk yüksekliği (Kalın ve rahat tutulabilir) */
     }
     .plotly-chart-container::-webkit-scrollbar-track {
-        background: #1e1e1e;
-        border-radius: 10px;
+        background: #1e1e1e; /* Ray rengi (Koyu gri) */
+        border-radius: 9px;
     }
     .plotly-chart-container::-webkit-scrollbar-thumb {
-        background: #555;
-        border-radius: 10px;
+        background-color: #888; /* Tutamaç rengi (Açık gri) */
+        border-radius: 9px;
+        border: 3px solid #1e1e1e; /* Etrafında boşluk hissi */
     }
     .plotly-chart-container::-webkit-scrollbar-thumb:hover {
-        background: #888;
+        background-color: #aaa; /* Üzerine gelince parlasın */
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- MQTT VE VERİ ALTYAPISI ---
+# --- MQTT ALTYAPISI ---
 @st.cache_resource
 def get_message_queue():
     return queue.Queue()
@@ -71,6 +72,7 @@ def start_mqtt():
 data_queue = get_message_queue()
 start_mqtt()
 
+# --- VERİ YÜKLEME ---
 if 'history_df' not in st.session_state:
     if os.path.exists(CSV_FILE):
         try:
@@ -80,23 +82,16 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- YENİ GRAFİK FONKSİYONU ---
+# --- GRAFİK FONKSİYONU ---
 def plot_interactive_chart(df):
     if df.empty: return None
     
-    # 1. SABİT GENİŞLİK AYARI (Sıkışmayı Önler)
-    # Her veri noktasına 30 piksel ayırıyoruz.
-    # 100 veri varsa grafik 3000 piksel genişliğinde çizilir.
-    # Bu sayede noktalar asla birbirine girmez.
-    POINT_WIDTH_PX = 30
+    # 1. GENİŞLİK AYARI (SABİT MESAFE)
+    # Her veri noktası için 50 piksel. 
+    # Bu mesafe KİLİTLENECEK, yani zoom-out yapılamayacak.
+    POINT_WIDTH_PX = 50
+    # En az ekran genişliği kadar olsun (1200px), veri çoksa uzasın.
     dynamic_width = max(1200, len(df) * POINT_WIDTH_PX)
-
-    # 2. BAŞLANGIÇ ODAĞI (Zoom Sınırı Gibi Davranır)
-    # Grafik ilk açıldığında sadece SON 50 VERİYİ gösterir.
-    # Bu, "maksimum zoom-out" hissi verir, çünkü başlangıçta sıkışık değildir.
-    total_points = len(df)
-    start_view = max(0, total_points - 50) 
-    end_view = total_points
 
     fig = px.line(
         df, 
@@ -112,21 +107,30 @@ def plot_interactive_chart(df):
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
         height=500,
-        width=dynamic_width, # <--- Grafiği zorla genişletiyoruz
+        width=dynamic_width, # Hesaplanan genişliği zorla
         margin=dict(l=20, r=20, t=50, b=20),
-        dragmode="pan" # Varsayılan olarak kaydırma modu
+        
+        # EFSANE AYAR: 'hover' modu. 
+        # Grafiğin içinde sürükleme yapılmaz, sadece üzerine gelince bilgi verir.
+        # Kaydırma işlemi tamamen aşağıdaki scrollbar'a bırakılır.
+        dragmode=False 
     )
 
     fig.update_xaxes(
         tickvals=df.index,
         ticktext=df['Zaman'],
-        # Kullanışsız dediğin o alt çubuğu KAPATIYORUZ
-        rangeslider=dict(visible=False), 
-        # Başlangıçta gösterilecek aralık (Son 50 veri)
-        range=[start_view, end_view], 
+        tickangle=-45,
+        rangeslider=dict(visible=False), # Plotly'nin kendi slider'ını kapattık
         type='category',
-        tickangle=-45
+        
+        # --- KİLİT NOKTASI ---
+        fixedrange=True # X ekseninde ZOOM yapmayı ve SÜRÜKLEMEYİ yasakla!
     )
+    
+    fig.update_yaxes(
+        fixedrange=True # Y ekseninde de zoom yasak
+    )
+    
     return fig
 
 # --- ARAYÜZ ---
@@ -134,20 +138,29 @@ st.subheader("📊 Canlı Değişim Grafiği")
 metric_col = st.empty()
 info_box = st.empty()
 
-# Grafik Alanı için HTML Yer Tutucu
+# Grafik Kutusu (HTML)
 chart_area = st.empty()
 
-# Grafiği Çizen Yardımcı Fonksiyon
 def render_chart():
     if not st.session_state.history_df.empty:
         fig = plot_interactive_chart(st.session_state.history_df.copy())
-        # Grafiği özel CSS kutumuzun içine koyuyoruz
+        
+        # Grafiği özel CSS kutusunun içine koyuyoruz
         st.markdown('<div class="plotly-chart-container">', unsafe_allow_html=True)
-        # use_container_width=False OLMALI ki bizim belirlediğimiz büyük genişlik geçerli olsun
-        st.plotly_chart(fig, use_container_width=False) 
+        
+        # config ayarları ile grafiğin üzerindeki butonları ve zoom özelliklerini kapatıyoruz
+        st.plotly_chart(
+            fig, 
+            use_container_width=False, # Bizim genişliğimiz geçerli olsun
+            config={
+                'scrollZoom': False,       # Mouse tekerleğiyle zoom YASAK
+                'displayModeBar': False,   # Üstteki butonları GİZLE
+                'staticPlot': False        # Hover (baloncuk) bilgisi açık kalsın
+            }
+        )
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 1. AÇILIŞ GÖSTERİMİ ---
+# --- 1. AÇILIŞ ---
 if not st.session_state.history_df.empty:
     last_row = st.session_state.history_df.iloc[-1]
     with metric_col.container():
@@ -194,9 +207,7 @@ while True:
                 icon = "🔴" if new_count > 15 else "🟢"
                 c3.metric("Durum", f"{status} {icon}")
 
-            # Grafiği Güncelle
             render_chart()
-            
             info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
     time.sleep(1)
