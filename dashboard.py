@@ -16,37 +16,6 @@ MAX_DISPLAY_ROWS = 5000
 
 st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide")
 
-# --- ÖZEL CSS (GELENEKSEL VE BELİRGİN SCROLLBAR) ---
-st.markdown("""
-<style>
-    /* Grafik Kutusu */
-    .plotly-chart-container {
-        overflow-x: auto;       /* Yatay kaydırmaya izin ver */
-        padding-bottom: 15px;   /* Scrollbar için alt boşluk */
-        border: 1px solid #444; /* Çerçeve (Sınırları belli olsun) */
-        border-radius: 5px;
-        background-color: #0e1117; /* Arkaplan rengi */
-    }
-
-    /* Scrollbar Tasarımı (Chrome/Safari/Edge) */
-    .plotly-chart-container::-webkit-scrollbar {
-        height: 18px; /* Çubuk yüksekliği (Kalın ve rahat tutulabilir) */
-    }
-    .plotly-chart-container::-webkit-scrollbar-track {
-        background: #1e1e1e; /* Ray rengi (Koyu gri) */
-        border-radius: 9px;
-    }
-    .plotly-chart-container::-webkit-scrollbar-thumb {
-        background-color: #888; /* Tutamaç rengi (Açık gri) */
-        border-radius: 9px;
-        border: 3px solid #1e1e1e; /* Etrafında boşluk hissi */
-    }
-    .plotly-chart-container::-webkit-scrollbar-thumb:hover {
-        background-color: #aaa; /* Üzerine gelince parlasın */
-    }
-</style>
-""", unsafe_allow_html=True)
-
 # --- MQTT ALTYAPISI ---
 @st.cache_resource
 def get_message_queue():
@@ -82,100 +51,96 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK FONKSİYONU ---
-def plot_interactive_chart(df):
+# --- YENİ GRAFİK FONKSİYONU ---
+def create_figure(df):
     if df.empty: return None
     
-    # 1. GENİŞLİK AYARI (SABİT MESAFE)
-    # Her veri noktası için 50 piksel. 
-    # Bu mesafe KİLİTLENECEK, yani zoom-out yapılamayacak.
-    POINT_WIDTH_PX = 50
-    # En az ekran genişliği kadar olsun (1200px), veri çoksa uzasın.
-    dynamic_width = max(1200, len(df) * POINT_WIDTH_PX)
+    # GENİŞLİK HESABI: Her veriye 40 piksel.
+    # Bu grafik ne kadar veri varsa o kadar uzar.
+    POINT_WIDTH_PX = 40
+    dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
     fig = px.line(
         df, 
         x=df.index, 
         y="Kişi", 
-        title="Zaman İçindeki Kişi Sayısı Değişimi", 
         markers=True,
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
     fig.update_layout(
-        xaxis_title="Zaman",
+        xaxis_title="", # Başlıkları kaldırdım daha temiz olsun
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
-        height=500,
-        width=dynamic_width, # Hesaplanan genişliği zorla
-        margin=dict(l=20, r=20, t=50, b=20),
-        
-        # EFSANE AYAR: 'hover' modu. 
-        # Grafiğin içinde sürükleme yapılmaz, sadece üzerine gelince bilgi verir.
-        # Kaydırma işlemi tamamen aşağıdaki scrollbar'a bırakılır.
-        dragmode=False 
+        height=450,
+        width=dynamic_width, # <--- Devasa genişlik burada ayarlanıyor
+        margin=dict(l=20, r=20, t=30, b=20),
+        dragmode=False, # Grafik içinde sürüklemeyi kapat (Scrollbar kullanılsın)
+        paper_bgcolor='rgba(0,0,0,0)', # Arkaplan şeffaf
+        plot_bgcolor='rgba(0,0,0,0)'
     )
 
     fig.update_xaxes(
         tickvals=df.index,
         ticktext=df['Zaman'],
         tickangle=-45,
-        rangeslider=dict(visible=False), # Plotly'nin kendi slider'ını kapattık
         type='category',
-        
-        # --- KİLİT NOKTASI ---
-        fixedrange=True # X ekseninde ZOOM yapmayı ve SÜRÜKLEMEYİ yasakla!
+        fixedrange=True # Zoom yapmayı yasakla
     )
     
-    fig.update_yaxes(
-        fixedrange=True # Y ekseninde de zoom yasak
-    )
+    fig.update_yaxes(fixedrange=True)
     
     return fig
 
-# --- ARAYÜZ ---
+# --- ARAYÜZ YERLEŞİMİ ---
 st.subheader("📊 Canlı Değişim Grafiği")
 metric_col = st.empty()
 info_box = st.empty()
 
-# Grafik Kutusu (HTML)
-chart_area = st.empty()
+# Grafik için tek bir HTML alanı ayırıyoruz
+chart_html_container = st.empty()
 
-def render_chart():
+def render_dashboard():
+    # 1. Metrikleri Güncelle
     if not st.session_state.history_df.empty:
-        fig = plot_interactive_chart(st.session_state.history_df.copy())
-        
-        # Grafiği özel CSS kutusunun içine koyuyoruz
-        st.markdown('<div class="plotly-chart-container">', unsafe_allow_html=True)
-        
-        # config ayarları ile grafiğin üzerindeki butonları ve zoom özelliklerini kapatıyoruz
-        st.plotly_chart(
-            fig, 
-            use_container_width=False, # Bizim genişliğimiz geçerli olsun
-            config={
-                'scrollZoom': False,       # Mouse tekerleğiyle zoom YASAK
-                'displayModeBar': False,   # Üstteki butonları GİZLE
-                'staticPlot': False        # Hover (baloncuk) bilgisi açık kalsın
-            }
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
+        last_row = st.session_state.history_df.iloc[-1]
+        with metric_col.container():
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Anlık Kişi", last_row['Kişi'])
+            c2.metric("Tarih", last_row['Zaman'])
+            status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
+            c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
-# --- 1. AÇILIŞ ---
+        # 2. Grafiği HTML Olarak Oluştur ve Bas
+        fig = create_figure(st.session_state.history_df)
+        
+        # Grafiği HTML koduna çeviriyoruz (Zoom çubuğunu gizleyerek)
+        fig_html = fig.to_html(config={'displayModeBar': False, 'scrollZoom': False}, include_plotlyjs='cdn')
+        
+        # Bu HTML kutusu, içeriği taşarsa scrollbar çıkarır.
+        # overflow-x: auto -> Yatay scrollbar otomatik çıksın
+        chart_html_container.markdown(
+            f"""
+            <div style="
+                overflow-x: auto; 
+                border: 1px solid #333; 
+                border-radius: 5px; 
+                background-color: #0e1117;
+                padding-bottom: 10px;">
+                {fig_html}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+# --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
-    last_row = st.session_state.history_df.iloc[-1]
-    with metric_col.container():
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Anlık Kişi", last_row['Kişi'])
-        c2.metric("Tarih", last_row['Zaman'])
-        status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
-        c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
-    
-    render_chart()
+    render_dashboard()
     info_box.success("Sistem hazır.")
 else:
     info_box.warning("Veri bekleniyor...")
 
-# --- 2. ANA DÖNGÜ ---
+# --- ANA DÖNGÜ ---
 while True:
     while not data_queue.empty():
         payload = data_queue.get()
@@ -200,14 +165,8 @@ while True:
             write_header = not os.path.exists(CSV_FILE)
             new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
             
-            with metric_col.container():
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Anlık Kişi", new_count, delta="Değişim Var 🔔")
-                c2.metric("Zaman (TR)", full_time_str)
-                icon = "🔴" if new_count > 15 else "🟢"
-                c3.metric("Durum", f"{status} {icon}")
-
-            render_chart()
+            # Ekrani Güncelle
+            render_dashboard()
             info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
     time.sleep(1)
