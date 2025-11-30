@@ -8,7 +8,7 @@ MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
 
 def main():
-    print("📡 Sahte Veri Simülatörü Başlatıldı...")
+    print("⚡️ HİPERAKTİF Test Simülatörü Başlatıldı...")
     
     client = mqtt.Client()
     try:
@@ -18,13 +18,22 @@ def main():
         print("❌ HATA: İnternet bağlantısı yok!")
         return
 
+    # Başlangıç değeri
+    last_count = 10
+
     while True:
-        # Rastgele bir insan sayısı uydur (10 ile 20 arası)
-        fake_count = random.randint(10, 20)
+        # Önceki sayıdan FARKLI bir sayı üretmeyi garanti et
+        # Eğer eskisi küçükse büyük yap, büyükse küçük yap (Zig-Zag taktiği)
+        if last_count < 15:
+            fake_count = random.randint(16, 25)
+        else:
+            fake_count = random.randint(5, 14)
+            
+        last_count = fake_count
         
         # Veri paketini hazırla
         payload = {
-            "room_id": "Amfi-101-Test",
+            "room_id": "Test-Oda",
             "occupancy": fake_count,
             "status": "Crowded" if fake_count > 15 else "Normal",
             "timestamp": time.time()
@@ -32,10 +41,10 @@ def main():
         
         # Gönder
         client.publish(MQTT_TOPIC, json.dumps(payload))
-        print(f"📤 Gönderildi: {fake_count} Kişi")
+        print(f"🚀 Veri Fırlatıldı: {fake_count} Kişi")
         
-        # 2 saniye bekle
-        time.sleep(2)
+        # Bekleme süresini azalttık (Daha seri veri aksın)
+        time.sleep(1.0) 
 
 if __name__ == "__main__":
     main()

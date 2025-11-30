@@ -181,4 +181,4 @@ while True:
             render_dashboard()
             info_box.success(f"Kayıt Eklendi: {full_time_str}")
 
-    time.sleep(1)
+    time.sleep(0.1)
