@@ -3,48 +3,45 @@ import json
 import time
 import random
 
-# --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
 
 def main():
-    print("⚡️ HİPERAKTİF Test Simülatörü Başlatıldı...")
+    print("🧪 Akıllı Test Simülatörü Başlatıldı...")
     
     client = mqtt.Client()
     try:
         client.connect(MQTT_BROKER, 1883, 60)
-        print("✅ Buluta Bağlandı!")
+        print("✅ Bağlandı!")
     except:
-        print("❌ HATA: İnternet bağlantısı yok!")
         return
 
-    # Başlangıç değeri
-    last_count = 10
-
+    # Başlangıç
+    current_count = 10
+    
     while True:
-        # Önceki sayıdan FARKLI bir sayı üretmeyi garanti et
-        # Eğer eskisi küçükse büyük yap, büyükse küçük yap (Zig-Zag taktiği)
-        if last_count < 15:
-            fake_count = random.randint(16, 25)
-        else:
-            fake_count = random.randint(5, 14)
+        # %20 ihtimalle sayı değişir (Grafikte yeni nokta oluşmalı)
+        # %80 ihtimalle sayı AYNI kalır (Grafikte yeni nokta OLUŞMAMALI)
+        if random.random() > 0.8:
+            old_count = current_count
+            # Sayıyı değiştir (Artır veya azalt)
+            if random.random() > 0.5:
+                current_count += random.randint(1, 3)
+            else:
+                current_count -= random.randint(1, 3)
             
-        last_count = fake_count
-        
-        # Veri paketini hazırla
+            print(f"🔀 DEĞİŞİM: {old_count} -> {current_count}")
+        else:
+            print(f"zzz Sabit: {current_count} (Grafiğe yansımamalı)")
+
         payload = {
-            "room_id": "Test-Oda",
-            "occupancy": fake_count,
-            "status": "Crowded" if fake_count > 15 else "Normal",
+            "occupancy": current_count,
+            "status": "Crowded" if current_count > 15 else "Normal",
             "timestamp": time.time()
         }
         
-        # Gönder
         client.publish(MQTT_TOPIC, json.dumps(payload))
-        print(f"🚀 Veri Fırlatıldı: {fake_count} Kişi")
-        
-        # Bekleme süresini azalttık (Daha seri veri aksın)
-        time.sleep(1.0) 
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()

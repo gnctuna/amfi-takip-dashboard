@@ -52,11 +52,11 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK OLUŞTURUCU ---
+# --- GRAFİK OLUŞTURUCU (MAVİ + SCROLLBAR) ---
 def create_figure(df):
     if df.empty: return None
     
-    # GENİŞLİK: Veri başına 35 piksel
+    # GENİŞLİK: Veri başına 35 piksel. Veri arttıkça uzar.
     POINT_WIDTH_PX = 35
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
@@ -65,7 +65,7 @@ def create_figure(df):
         x=df.index, 
         y="Kişi", 
         markers=True,
-        color_discrete_sequence=['#29b5e8'], # Streamlit Mavisi
+        color_discrete_sequence=['#29b5e8'], # Mavi Renk
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
@@ -101,7 +101,6 @@ chart_placeholder = st.empty()
 
 def render_dashboard():
     if not st.session_state.history_df.empty:
-        # 1. Metrikleri Güncelle
         last_row = st.session_state.history_df.iloc[-1]
         with metric_col.container():
             c1, c2, c3 = st.columns(3)
@@ -110,18 +109,15 @@ def render_dashboard():
             status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
             c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
-        # 2. Grafiği Oluştur
         fig = create_figure(st.session_state.history_df)
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # 3. HTML + JAVASCRIPT (SİHİR BURADA)
-        # Bu JS kodu, grafik yüklendiği an scrollbar'ı en sağa çeker.
+        # Scrollbar otomatik en sağa kaysın diye JS ekliyoruz
         html_code = f"""
         <html>
         <head>
             <style>
                 body {{ margin: 0; background-color: #0e1117; }}
-                /* Scrollbar Tasarımı */
                 ::-webkit-scrollbar {{ height: 12px; }}
                 ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
                 ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
@@ -133,8 +129,6 @@ def render_dashboard():
                 {fig_html}
             </div>
             <script>
-                // AUTO-SCROLL SCRIPTI
-                // Sayfa yüklendiğinde veya güncellendiğinde çalışır.
                 var container = document.getElementById("chart-container");
                 container.scrollLeft = container.scrollWidth;
             </script>
@@ -152,51 +146,47 @@ if not st.session_state.history_df.empty:
 else:
     info_box.warning("Veri bekleniyor...")
 
-# --- ANA DÖNGÜ (TURBO MOD) ---
+# --- ANA DÖNGÜ ---
 while True:
-    # 1. Kuyruktaki TÜM verileri topla (Batch Processing)
-    new_data_list = []
-    
-    while not data_queue.empty():
-        payload = data_queue.get()
-        new_count = payload['occupancy']
-        status = payload.get('status', 'Normal')
+    # Kuyruktaki verileri kontrol et
+    if not data_queue.empty():
         
-        # Sadece son gelen verinin saatini alabiliriz veya hepsini işleyebiliriz.
-        # Burada her paketi listeye ekliyoruz.
-        tr_now = datetime.now() + timedelta(hours=3)
-        full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
-        
-        new_data_list.append({
-            "Zaman": full_time_str, 
-            "Kişi": new_count, 
-            "Durum": status
-        })
-
-    # 2. Eğer yeni veri varsa İŞLE ve ÇİZ
-    if new_data_list:
-        new_rows_df = pd.DataFrame(new_data_list)
-        
-        # Veri tekrarını önlemek için son kontrol
-        # (Aynı saniyede 10 veri gelirse grafik karışmasın)
+        # --- KRİTİK DÜZELTME: REFERANS NOKTASI ---
+        # Döngüye girmeden önce en son bildiğimiz sayıyı alıyoruz.
         if not st.session_state.history_df.empty:
-            last_val = st.session_state.history_df.iloc[-1]['Kişi']
-            # Sadece son değer farklıysa veya liste kalabalıksa ekle
-            # Basitlik için hepsini ekliyoruz:
-            st.session_state.history_df = pd.concat([st.session_state.history_df, new_rows_df], ignore_index=True)
+            running_last_count = st.session_state.history_df.iloc[-1]['Kişi']
         else:
-            st.session_state.history_df = pd.concat([st.session_state.history_df, new_rows_df], ignore_index=True)
+            running_last_count = -1 # Hiç veri yoksa
             
-        # CSV'ye Yaz (Append Modu - Performanslı)
-        write_header = not os.path.exists(CSV_FILE)
-        new_rows_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
+        changes_detected = False
         
-        # EKRANI GÜNCELLE
-        render_dashboard()
+        # Kuyruktaki TÜM mesajları tek tek işle
+        while not data_queue.empty():
+            payload = data_queue.get()
+            new_count = payload['occupancy']
+            status = payload.get('status', 'Normal')
+            
+            # --- FİLTRE MANTIĞI ---
+            # Sadece sayı, elimizdeki son referanstan farklıysa kaydet.
+            if new_count != running_last_count:
+                tr_now = datetime.now() + timedelta(hours=3)
+                full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
+                
+                new_data = {"Zaman": full_time_str, "Kişi": new_count, "Durum": status}
+                new_row_df = pd.DataFrame([new_data])
+                st.session_state.history_df = pd.concat([st.session_state.history_df, new_row_df], ignore_index=True)
+                
+                # CSV'ye Yaz
+                write_header = not os.path.exists(CSV_FILE)
+                new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
+                
+                # REFERANSI GÜNCELLE! (Artık yeni son sayımız bu)
+                running_last_count = new_count 
+                changes_detected = True
         
-        # Son verinin zamanını göster
-        last_time = new_data_list[-1]["Zaman"]
-        info_box.success(f"Güncel Veri Alındı: {last_time}")
+        # Eğer en az bir değişiklik olduysa ekranı yenile
+        if changes_detected:
+            render_dashboard()
+            info_box.success(f"Yeni Veri Algılandı.")
 
-    # İşlemciyi yormamak için minik bekleme
     time.sleep(0.1)
