@@ -77,7 +77,7 @@ def create_figure(df):
         height=450,
         width=dynamic_width,
         margin=dict(l=20, r=20, t=30, b=20),
-        dragmode=False, # Plotly sürüklemesini kapat (HTML yönetecek)
+        dragmode=False, 
         paper_bgcolor='#0e1117', 
         plot_bgcolor='#0e1117',
         xaxis=dict(showgrid=True, gridcolor='#333'),
@@ -113,7 +113,7 @@ def render_dashboard():
         fig = create_figure(st.session_state.history_df)
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # --- HTML + JS (ÇİFT SCROLLBAR SİSTEMİ) ---
+        # --- HTML + JS (SABİT BUTONLAR) ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -122,132 +122,131 @@ def render_dashboard():
             <style>
                 body {{ margin: 0; background-color: #0e1117; overflow: hidden; font-family: sans-serif; }}
                 
-                /* 1. DIŞ PENCERE (WRAPPER) */
-                /* Bu kısım ekranda sabit durur, scrollbarlar burada çıkar */
-                #chart-window {{
-                    width: 100%;
-                    height: 500px; /* Sabit yükseklik */
-                    overflow: auto; /* Hem YATAY hem DİKEY scrollbar otomatik çıkar */
+                /* Kapsayıcı Alan */
+                #wrapper {{
                     position: relative;
-                    border: 1px solid #333;
-                    border-radius: 5px;
-                    -webkit-overflow-scrolling: touch; /* Mobil akıcılık */
+                    width: 100%;
+                    height: 500px;
                 }}
 
-                /* 2. İÇERİK (CONTENT) */
-                /* Grafik bunun içindedir ve zoom yaptıkça bu büyür */
+                /* Kayan Grafik Alanı */
+                #chart-scroll-area {{
+                    width: 100%;
+                    height: 100%;
+                    overflow-x: auto; 
+                    overflow-y: hidden;
+                    padding-bottom: 5px;
+                    -webkit-overflow-scrolling: touch;
+                    cursor: grab;
+                }}
+
+                /* Zoomlanacak İçerik */
                 #chart-content {{
                     transform-origin: 0 0;
-                    /* Başlangıçta sığdır */
                 }}
 
-                /* Zoom Butonları */
+                /* --- SABİT BUTONLAR --- */
+                /* 'position: fixed' sayesinde scroll'dan etkilenmezler */
                 .zoom-controls {{
-                    position: absolute;
-                    top: 10px;
-                    right: 25px; /* Scrollbarın üstüne binmesin diye biraz sola */
-                    z-index: 999;
+                    position: fixed; 
+                    top: 15px;
+                    right: 20px;
+                    z-index: 9999; /* En üstte durması için */
                     display: flex;
-                    gap: 5px;
+                    gap: 8px;
+                    background-color: rgba(14, 17, 23, 0.8); /* Arkası hafif siyah olsun ki çizgiler karışmasın */
+                    padding: 5px;
+                    border-radius: 20px;
                 }}
                 
                 .btn {{
-                    background-color: rgba(41, 181, 232, 0.2);
+                    background-color: rgba(41, 181, 232, 0.1);
                     color: #29b5e8;
                     border: 1px solid #29b5e8;
                     border-radius: 50%;
-                    width: 35px;
-                    height: 35px;
-                    font-size: 20px;
+                    width: 32px;
+                    height: 32px;
+                    font-size: 18px;
                     font-weight: bold;
                     cursor: pointer;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     user-select: none;
+                    transition: all 0.2s;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.5);
                 }}
                 
                 .btn:active {{
                     background-color: #29b5e8;
                     color: white;
+                    transform: scale(0.9);
                 }}
 
-                /* Scrollbar Tasarımı */
-                ::-webkit-scrollbar {{ width: 12px; height: 12px; }} /* Hem dikey hem yatay kalınlık */
+                /* Scrollbar */
+                ::-webkit-scrollbar {{ height: 12px; }}
                 ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
                 ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
                 ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
-                /* Scrollbar köşesi (iki barın kesişimi) */
-                ::-webkit-scrollbar-corner {{ background: #1e1e1e; }}
             </style>
         </head>
         <body>
-            <div id="chart-window">
+            <div id="wrapper">
                 <div class="zoom-controls">
                     <div class="btn" onclick="changeZoom(-0.1)">-</div>
                     <div class="btn" onclick="changeZoom(0.1)">+</div>
                 </div>
 
-                <div id="chart-content">
-                    {fig_html}
+                <div id="chart-scroll-area">
+                    <div id="chart-content">
+                        {fig_html}
+                    </div>
                 </div>
             </div>
 
             <script>
-                var windowDiv = document.getElementById("chart-window");
-                var contentDiv = document.getElementById("chart-content");
+                var scrollArea = document.getElementById("chart-scroll-area");
+                var content = document.getElementById("chart-content");
                 
-                var scrollXKey = "scrollX_V4";
-                var scrollYKey = "scrollY_V4";
-                var zoomKey = "zoomLevel_V4";
+                var scrollKey = "scrollPos_Fixed_V5";
+                var zoomKey = "zoomLevel_Fixed_V5";
 
-                // --- ZOOM FONKSİYONLARI ---
+                // --- ZOOM ---
                 var currentZoom = parseFloat(sessionStorage.getItem(zoomKey)) || 1.0;
                 
                 function applyZoom() {{
-                    contentDiv.style.zoom = currentZoom; 
-                    // Firefox desteği için gerekirse transform scale eklenebilir ama zoom genelde yeterli
+                    content.style.zoom = currentZoom;
                     sessionStorage.setItem(zoomKey, currentZoom);
                 }}
                 
                 function changeZoom(delta) {{
                     currentZoom += delta;
                     if (currentZoom < 0.2) currentZoom = 0.2;
-                    if (currentZoom > 4.0) currentZoom = 4.0;
+                    if (currentZoom > 3.0) currentZoom = 3.0;
                     applyZoom();
                 }}
                 
-                applyZoom(); // Başlangıçta uygula
+                applyZoom();
 
-                // --- HAFIZALI SCROLL (HEM YATAY HEM DİKEY) ---
-                var savedX = sessionStorage.getItem(scrollXKey);
-                var savedY = sessionStorage.getItem(scrollYKey);
+                // --- HAFIZALI SCROLL ---
+                var savedPos = sessionStorage.getItem(scrollKey);
                 
                 setTimeout(function() {{
-                    // YATAY KONUM
-                    if (savedX !== null) {{
-                        windowDiv.scrollLeft = parseInt(savedX);
+                    if (savedPos !== null && savedPos !== "undefined") {{
+                        scrollArea.scrollLeft = parseInt(savedPos);
                     }} else {{
-                        windowDiv.scrollLeft = windowDiv.scrollWidth; // En sağa git
-                    }}
-
-                    // DİKEY KONUM
-                    if (savedY !== null) {{
-                        windowDiv.scrollTop = parseInt(savedY);
+                        scrollArea.scrollLeft = scrollArea.scrollWidth;
                     }}
                 }}, 100);
 
-                // Kaydettikçe hafızaya at
-                windowDiv.addEventListener("scroll", function() {{
-                    sessionStorage.setItem(scrollXKey, windowDiv.scrollLeft);
-                    sessionStorage.setItem(scrollYKey, windowDiv.scrollTop);
+                scrollArea.addEventListener("scroll", function() {{
+                    sessionStorage.setItem(scrollKey, scrollArea.scrollLeft);
                 }});
             </script>
         </body>
         </html>
         """
         
-        # height=520 yaptık ki scrollbarlar rahat görünsün
         with chart_placeholder.container():
             components.html(html_code, height=520)
 
