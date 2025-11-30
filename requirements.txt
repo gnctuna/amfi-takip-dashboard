@@ -2,6 +2,3 @@ streamlit
 pandas
 paho-mqtt
 plotly
-ultralytics
-opencv-python==4.10.0.84 # Kararlı versiyon (NumPy 2.x çakışmasını engeller)
-numpy<2 # NumPy'ı 1.x'e sabitler (Diğer kütüphaneler için kritik)
