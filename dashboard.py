@@ -58,7 +58,7 @@ if 'history_df' not in st.session_state:
 def create_figure(df):
     if df.empty: return None
     
-    # GENİŞLİK AYARI: Her veri için 40px
+    # Standart Genişlik (Zoom çarpanı JS tarafında halledilecek)
     POINT_WIDTH_PX = 40
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
@@ -76,14 +76,9 @@ def create_figure(df):
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
         height=450,
-        width=dynamic_width, # Genişliği zorluyoruz
+        width=dynamic_width,
         margin=dict(l=20, r=20, t=30, b=20),
-        
-        # --- ÖNEMLİ: DRAGMODE KAPALI ---
-        # Grafiğin kendi içindeki sürüklemeyi kapatıyoruz ki
-        # dışarıdaki HTML kutusunun kaydırması çalışsın.
-        dragmode=False, 
-        
+        dragmode=False, # Plotly'nin kendi sürüklemesini kapat (Dış kutu yönetecek)
         paper_bgcolor='#0e1117', 
         plot_bgcolor='#0e1117',
         xaxis=dict(showgrid=True, gridcolor='#333'),
@@ -93,7 +88,7 @@ def create_figure(df):
     fig.update_xaxes(
         showticklabels=False, 
         rangeslider=dict(visible=False), 
-        fixedrange=True, # Plotly'nin zoom'unu kilitle
+        fixedrange=True, 
         type='category'
     )
     
@@ -116,64 +111,127 @@ def render_dashboard():
             status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
             c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
-        # Grafiği Oluştur
         fig = create_figure(st.session_state.history_df)
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # --- HTML + JS (HAFIZALI SCROLLBAR) ---
+        # --- HTML + JS (ZOOM ÖZELLİKLİ) ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                body {{ margin: 0; background-color: #0e1117; overflow: hidden; }}
+                body {{ margin: 0; background-color: #0e1117; overflow: hidden; font-family: sans-serif; }}
                 
                 #chart-wrapper {{
                     width: 100%;
-                    overflow-x: auto; /* Yatay Scrollbar */
+                    overflow-x: auto; 
                     overflow-y: hidden;
                     padding-bottom: 5px;
-                    -webkit-overflow-scrolling: touch; /* iPhone Sürükleme Desteği */
+                    -webkit-overflow-scrolling: touch;
                     cursor: grab;
+                    position: relative;
                 }}
                 
-                #chart-wrapper:active {{
-                    cursor: grabbing;
+                #chart-content {{
+                    /* Zoom işlemi bu kutuya uygulanacak */
+                    transform-origin: 0 0;
                 }}
 
-                /* Scrollbar Tasarımı */
-                ::-webkit-scrollbar {{ height: 12px; }}
+                /* Zoom Butonları */
+                .zoom-controls {{
+                    position: fixed;
+                    top: 10px;
+                    right: 10px;
+                    z-index: 999;
+                    display: flex;
+                    gap: 5px;
+                }}
+                
+                .btn {{
+                    background-color: rgba(41, 181, 232, 0.2);
+                    color: #29b5e8;
+                    border: 1px solid #29b5e8;
+                    border-radius: 50%;
+                    width: 35px;
+                    height: 35px;
+                    font-size: 20px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    user-select: none;
+                    transition: all 0.2s;
+                }}
+                
+                .btn:active {{
+                    background-color: #29b5e8;
+                    color: white;
+                    transform: scale(0.9);
+                }}
+
+                /* Scrollbar */
+                ::-webkit-scrollbar {{ height: 10px; }}
                 ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
-                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
+                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 5px; }}
                 ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
             </style>
         </head>
         <body>
+            <div class="zoom-controls">
+                <div class="btn" onclick="changeZoom(-0.1)">-</div>
+                <div class="btn" onclick="changeZoom(0.1)">+</div>
+            </div>
+
             <div id="chart-wrapper">
-                {fig_html}
+                <div id="chart-content">
+                    {fig_html}
+                </div>
             </div>
 
             <script>
-                var container = document.getElementById("chart-wrapper");
-                var storageKey = "scrollPos_Final_V3"; 
-
-                // 1. HAFIZADAN OKU
-                var savedPos = sessionStorage.getItem(storageKey);
+                var wrapper = document.getElementById("chart-wrapper");
+                var content = document.getElementById("chart-content");
                 
-                // Sayfa ilk yüklendiğinde grafik çizilene kadar bekle
+                var scrollKey = "scrollPos_Zoom_V1";
+                var zoomKey = "zoomLevel_V1";
+
+                // --- 1. ZOOM FONKSİYONLARI ---
+                // Varsayılan zoom 1.0 (Normal)
+                var currentZoom = parseFloat(sessionStorage.getItem(zoomKey)) || 1.0;
+                
+                function applyZoom() {{
+                    // Webkit (Chrome/Safari) için zoom özelliği
+                    content.style.zoom = currentZoom;
+                    // Zoom seviyesini kaydet
+                    sessionStorage.setItem(zoomKey, currentZoom);
+                }}
+                
+                function changeZoom(delta) {{
+                    currentZoom += delta;
+                    // Sınırlar: En küçük 0.2x, En büyük 3.0x
+                    if (currentZoom < 0.2) currentZoom = 0.2;
+                    if (currentZoom > 3.0) currentZoom = 3.0;
+                    applyZoom();
+                }}
+                
+                // Başlangıçta zoom'u uygula
+                applyZoom();
+
+                // --- 2. SCROLL HAFIZASI ---
+                var savedPos = sessionStorage.getItem(scrollKey);
+                
                 setTimeout(function() {{
                     if (savedPos !== null && savedPos !== "undefined") {{
-                        container.scrollLeft = parseInt(savedPos);
+                        wrapper.scrollLeft = parseInt(savedPos);
                     }} else {{
-                        // Kayıt yoksa en sağa git
-                        container.scrollLeft = container.scrollWidth;
+                        wrapper.scrollLeft = wrapper.scrollWidth;
                     }}
                 }}, 100);
 
-                // 2. HAFIZAYA YAZ
-                container.addEventListener("scroll", function() {{
-                    sessionStorage.setItem(storageKey, container.scrollLeft);
+                wrapper.addEventListener("scroll", function() {{
+                    sessionStorage.setItem(scrollKey, wrapper.scrollLeft);
                 }});
             </script>
         </body>
@@ -181,7 +239,7 @@ def render_dashboard():
         """
         
         with chart_placeholder.container():
-            components.html(html_code, height=480)
+            components.html(html_code, height=500) # Butonlar için biraz yer açtık
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
@@ -206,7 +264,7 @@ while True:
             new_count = int(payload['occupancy'])
             status = payload.get('status', 'Normal')
             
-            # --- FİLTRE: Sadece Değişimi Kaydet ---
+            # Filtre: Sadece değişimleri kaydet
             if new_count != running_last_count:
                 tr_now = datetime.now() + timedelta(hours=3)
                 full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
