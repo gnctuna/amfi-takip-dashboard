@@ -54,20 +54,25 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK OLUŞTURUCU ---
+# --- GRAFİK OLUŞTURUCU (TERS ZAMAN AKIŞI) ---
 def create_figure(df):
     if df.empty: return None
+    
+    # --- KRİTİK DEĞİŞİKLİK: VERİYİ TERS ÇEVİR ---
+    # En yeni veri en üstte (index 0) olsun.
+    # [::-1] komutu dataframe'i ters çevirir.
+    reversed_df = df.iloc[::-1]
     
     POINT_WIDTH_PX = 35
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
     fig = px.line(
-        df, 
-        x=df.index, 
+        reversed_df, 
+        x=reversed_df.index, # Index artık ters (Büyükten küçüğe)
         y="Kişi", 
         markers=True,
         color_discrete_sequence=['#29b5e8'], 
-        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
+        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True}
     )
     
     fig.update_layout(
@@ -80,7 +85,7 @@ def create_figure(df):
         dragmode="pan",
         paper_bgcolor='#0e1117', 
         plot_bgcolor='#0e1117',
-        xaxis=dict(showgrid=True, gridcolor='#333'),
+        xaxis=dict(showgrid=True, gridcolor='#333', autorange="reversed"), # Grafiği sağdan sola akıt
         yaxis=dict(showgrid=True, gridcolor='#333')
     )
 
@@ -95,7 +100,7 @@ def create_figure(df):
     return fig
 
 # --- ARAYÜZ ---
-st.subheader("📊 Canlı Değişim Grafiği")
+st.subheader("📊 Canlı Değişim Grafiği (Güncel Veri Solda)")
 metric_col = st.empty()
 info_box = st.empty()
 chart_placeholder = st.empty()
@@ -113,7 +118,9 @@ def render_dashboard():
         fig = create_figure(st.session_state.history_df)
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # --- GÜNCELLENEN KISIM: ZAMAN AYARLI SCROLL ---
+        # --- JS KODUNU KALDIRDIK ---
+        # Artık "Sona Git" dememize gerek yok çünkü BAŞLANGIÇ zaten SONU gösteriyor.
+        # Bu sayede titreme %100 yok olur.
         html_code = f"""
         <html>
         <head>
@@ -126,17 +133,9 @@ def render_dashboard():
             </style>
         </head>
         <body>
-            <div id="chart-container" style="width: 100%; overflow-x: auto; padding-bottom: 5px;">
+            <div style="width: 100%; overflow-x: auto; padding-bottom: 5px;">
                 {fig_html}
             </div>
-            <script>
-                // Tarayıcıya 100ms beklemesi gerektiğini söylüyoruz.
-                // Bu süre içinde grafik çiziliyor, SONRA scroll kayıyor.
-                setTimeout(function() {{
-                    var container = document.getElementById("chart-container");
-                    container.scrollLeft = container.scrollWidth;
-                }}, 100);
-            </script>
         </body>
         </html>
         """
