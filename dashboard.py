@@ -58,7 +58,6 @@ if 'history_df' not in st.session_state:
 def create_figure(df):
     if df.empty: return None
     
-    # Standart Genişlik (Zoom çarpanı JS tarafında halledilecek)
     POINT_WIDTH_PX = 40
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
@@ -78,7 +77,7 @@ def create_figure(df):
         height=450,
         width=dynamic_width,
         margin=dict(l=20, r=20, t=30, b=20),
-        dragmode=False, # Plotly'nin kendi sürüklemesini kapat (Dış kutu yönetecek)
+        dragmode=False, # Plotly sürüklemesini kapat (HTML yönetecek)
         paper_bgcolor='#0e1117', 
         plot_bgcolor='#0e1117',
         xaxis=dict(showgrid=True, gridcolor='#333'),
@@ -114,7 +113,7 @@ def render_dashboard():
         fig = create_figure(st.session_state.history_df)
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # --- HTML + JS (ZOOM ÖZELLİKLİ) ---
+        # --- HTML + JS (ÇİFT SCROLLBAR SİSTEMİ) ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -123,26 +122,30 @@ def render_dashboard():
             <style>
                 body {{ margin: 0; background-color: #0e1117; overflow: hidden; font-family: sans-serif; }}
                 
-                #chart-wrapper {{
+                /* 1. DIŞ PENCERE (WRAPPER) */
+                /* Bu kısım ekranda sabit durur, scrollbarlar burada çıkar */
+                #chart-window {{
                     width: 100%;
-                    overflow-x: auto; 
-                    overflow-y: hidden;
-                    padding-bottom: 5px;
-                    -webkit-overflow-scrolling: touch;
-                    cursor: grab;
+                    height: 500px; /* Sabit yükseklik */
+                    overflow: auto; /* Hem YATAY hem DİKEY scrollbar otomatik çıkar */
                     position: relative;
+                    border: 1px solid #333;
+                    border-radius: 5px;
+                    -webkit-overflow-scrolling: touch; /* Mobil akıcılık */
                 }}
-                
+
+                /* 2. İÇERİK (CONTENT) */
+                /* Grafik bunun içindedir ve zoom yaptıkça bu büyür */
                 #chart-content {{
-                    /* Zoom işlemi bu kutuya uygulanacak */
                     transform-origin: 0 0;
+                    /* Başlangıçta sığdır */
                 }}
 
                 /* Zoom Butonları */
                 .zoom-controls {{
-                    position: fixed;
+                    position: absolute;
                     top: 10px;
-                    right: 10px;
+                    right: 25px; /* Scrollbarın üstüne binmesin diye biraz sola */
                     z-index: 999;
                     display: flex;
                     gap: 5px;
@@ -162,84 +165,91 @@ def render_dashboard():
                     align-items: center;
                     justify-content: center;
                     user-select: none;
-                    transition: all 0.2s;
                 }}
                 
                 .btn:active {{
                     background-color: #29b5e8;
                     color: white;
-                    transform: scale(0.9);
                 }}
 
-                /* Scrollbar */
-                ::-webkit-scrollbar {{ height: 10px; }}
+                /* Scrollbar Tasarımı */
+                ::-webkit-scrollbar {{ width: 12px; height: 12px; }} /* Hem dikey hem yatay kalınlık */
                 ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
-                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 5px; }}
+                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
                 ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
+                /* Scrollbar köşesi (iki barın kesişimi) */
+                ::-webkit-scrollbar-corner {{ background: #1e1e1e; }}
             </style>
         </head>
         <body>
-            <div class="zoom-controls">
-                <div class="btn" onclick="changeZoom(-0.1)">-</div>
-                <div class="btn" onclick="changeZoom(0.1)">+</div>
-            </div>
+            <div id="chart-window">
+                <div class="zoom-controls">
+                    <div class="btn" onclick="changeZoom(-0.1)">-</div>
+                    <div class="btn" onclick="changeZoom(0.1)">+</div>
+                </div>
 
-            <div id="chart-wrapper">
                 <div id="chart-content">
                     {fig_html}
                 </div>
             </div>
 
             <script>
-                var wrapper = document.getElementById("chart-wrapper");
-                var content = document.getElementById("chart-content");
+                var windowDiv = document.getElementById("chart-window");
+                var contentDiv = document.getElementById("chart-content");
                 
-                var scrollKey = "scrollPos_Zoom_V1";
-                var zoomKey = "zoomLevel_V1";
+                var scrollXKey = "scrollX_V4";
+                var scrollYKey = "scrollY_V4";
+                var zoomKey = "zoomLevel_V4";
 
-                // --- 1. ZOOM FONKSİYONLARI ---
-                // Varsayılan zoom 1.0 (Normal)
+                // --- ZOOM FONKSİYONLARI ---
                 var currentZoom = parseFloat(sessionStorage.getItem(zoomKey)) || 1.0;
                 
                 function applyZoom() {{
-                    // Webkit (Chrome/Safari) için zoom özelliği
-                    content.style.zoom = currentZoom;
-                    // Zoom seviyesini kaydet
+                    contentDiv.style.zoom = currentZoom; 
+                    // Firefox desteği için gerekirse transform scale eklenebilir ama zoom genelde yeterli
                     sessionStorage.setItem(zoomKey, currentZoom);
                 }}
                 
                 function changeZoom(delta) {{
                     currentZoom += delta;
-                    // Sınırlar: En küçük 0.2x, En büyük 3.0x
                     if (currentZoom < 0.2) currentZoom = 0.2;
-                    if (currentZoom > 3.0) currentZoom = 3.0;
+                    if (currentZoom > 4.0) currentZoom = 4.0;
                     applyZoom();
                 }}
                 
-                // Başlangıçta zoom'u uygula
-                applyZoom();
+                applyZoom(); // Başlangıçta uygula
 
-                // --- 2. SCROLL HAFIZASI ---
-                var savedPos = sessionStorage.getItem(scrollKey);
+                // --- HAFIZALI SCROLL (HEM YATAY HEM DİKEY) ---
+                var savedX = sessionStorage.getItem(scrollXKey);
+                var savedY = sessionStorage.getItem(scrollYKey);
                 
                 setTimeout(function() {{
-                    if (savedPos !== null && savedPos !== "undefined") {{
-                        wrapper.scrollLeft = parseInt(savedPos);
+                    // YATAY KONUM
+                    if (savedX !== null) {{
+                        windowDiv.scrollLeft = parseInt(savedX);
                     }} else {{
-                        wrapper.scrollLeft = wrapper.scrollWidth;
+                        windowDiv.scrollLeft = windowDiv.scrollWidth; // En sağa git
+                    }}
+
+                    // DİKEY KONUM
+                    if (savedY !== null) {{
+                        windowDiv.scrollTop = parseInt(savedY);
                     }}
                 }}, 100);
 
-                wrapper.addEventListener("scroll", function() {{
-                    sessionStorage.setItem(scrollKey, wrapper.scrollLeft);
+                // Kaydettikçe hafızaya at
+                windowDiv.addEventListener("scroll", function() {{
+                    sessionStorage.setItem(scrollXKey, windowDiv.scrollLeft);
+                    sessionStorage.setItem(scrollYKey, windowDiv.scrollTop);
                 }});
             </script>
         </body>
         </html>
         """
         
+        # height=520 yaptık ki scrollbarlar rahat görünsün
         with chart_placeholder.container():
-            components.html(html_code, height=500) # Butonlar için biraz yer açtık
+            components.html(html_code, height=520)
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
@@ -264,7 +274,6 @@ while True:
             new_count = int(payload['occupancy'])
             status = payload.get('status', 'Normal')
             
-            # Filtre: Sadece değişimleri kaydet
             if new_count != running_last_count:
                 tr_now = datetime.now() + timedelta(hours=3)
                 full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
