@@ -54,7 +54,7 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK OLUŞTURUCU (Normal Zaman Akışı) ---
+# --- GRAFİK OLUŞTURUCU ---
 def create_figure(df):
     if df.empty: return None
     
@@ -77,7 +77,7 @@ def create_figure(df):
         height=450,
         width=dynamic_width, 
         margin=dict(l=20, r=20, t=30, b=20),
-        dragmode="pan",
+        dragmode="pan", 
         paper_bgcolor='#0e1117', 
         plot_bgcolor='#0e1117',
         xaxis=dict(showgrid=True, gridcolor='#333'),
@@ -113,14 +113,24 @@ def render_dashboard():
         fig = create_figure(st.session_state.history_df)
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # --- İŞTE SİHİRLİ JAVASCRIPT ---
-        # Bu kod tarayıcının hafızasına (sessionStorage) scroll konumunu kaydeder.
-        # Sayfa yenilendiğinde oradan okuyup geri yükler.
+        # --- İŞTE IPHONE DÜZELTMESİ BURADA ---
         html_code = f"""
         <html>
         <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {{ margin: 0; background-color: #0e1117; }}
+                
+                /* iPhone için pürüzsüz kaydırma */
+                #chart-container {{
+                    width: 100%; 
+                    overflow-x: auto; 
+                    padding-bottom: 5px;
+                    -webkit-overflow-scrolling: touch; /* <--- SİHİRLİ KOD BU */
+                    cursor: grab;
+                }}
+
+                /* Scrollbar Tasarımı */
                 ::-webkit-scrollbar {{ height: 12px; }}
                 ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
                 ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
@@ -128,25 +138,22 @@ def render_dashboard():
             </style>
         </head>
         <body>
-            <div id="chart-container" style="width: 100%; overflow-x: auto; padding-bottom: 5px;">
+            <div id="chart-container">
                 {fig_html}
             </div>
             <script>
                 var container = document.getElementById("chart-container");
-                var storageKey = "scrollPos_Amfi_V1"; // Hafıza Anahtarı
+                var storageKey = "scrollPos_Mobile_V2"; 
 
-                // 1. GERİ YÜKLEME: Sayfa açılır açılmaz hafızaya bak
+                // HAFIZA: Kaldığı yerden devam et
                 var savedPos = sessionStorage.getItem(storageKey);
                 
                 if (savedPos !== null) {{
-                    // Eğer hafızada kayıt varsa oraya git
                     container.scrollLeft = parseInt(savedPos);
                 }} else {{
-                    // İlk defa açılıyorsa EN SONA (Sağa) git
                     container.scrollLeft = container.scrollWidth;
                 }}
 
-                // 2. KAYDETME: Sen kaydırdıkça hafızayı güncelle
                 container.onscroll = function() {{
                     sessionStorage.setItem(storageKey, container.scrollLeft);
                 }};
@@ -155,6 +162,7 @@ def render_dashboard():
         </html>
         """
         
+        # scrolling=True parametresi Iframe'in kendisinin de kaydırılabilir olmasını sağlar
         with chart_placeholder.container():
             components.html(html_code, height=480, scrolling=True)
 
