@@ -52,51 +52,41 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK OLUŞTURUCU (ESKİ GÜZEL MAVİ TASARIM) ---
+# --- GRAFİK OLUŞTURUCU ---
 def create_figure(df):
     if df.empty: return None
     
-    # 1. GENİŞLİK HESABI (Sıkışmayı Önler)
-    # Her veri noktasına 35 piksel ayırıyoruz. Grafik sağa doğru uzar.
+    # GENİŞLİK: Veri başına 35 piksel
     POINT_WIDTH_PX = 35
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
-    # 2. ESKİ GÜZEL TASARIM (Streamlit Mavisi)
-    # color_discrete_sequence=['#29b5e8'] -> İşte o sevdiğin mavi renk bu!
     fig = px.line(
         df, 
         x=df.index, 
         y="Kişi", 
         markers=True,
-        title="",
-        color_discrete_sequence=['#29b5e8'], # Parlak Mavi
+        color_discrete_sequence=['#29b5e8'], # Streamlit Mavisi
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
     fig.update_layout(
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
-        template="plotly_dark", # Koyu tema (ama mavi çizgili)
+        template="plotly_dark",
         height=450,
-        width=dynamic_width, # Hesaplanan genişlik
+        width=dynamic_width, 
         margin=dict(l=20, r=20, t=30, b=20),
-        
-        # Telefondan parmakla sağa-sola kaydırmayı açar
         dragmode="pan",
-        
-        # Arkaplanı Streamlit ile tam uyumlu yap
         paper_bgcolor='#0e1117', 
         plot_bgcolor='#0e1117',
-        
-        # O siyah ızgara çizgilerini yumuşat
         xaxis=dict(showgrid=True, gridcolor='#333'),
         yaxis=dict(showgrid=True, gridcolor='#333')
     )
 
     fig.update_xaxes(
-        showticklabels=False, # Alttaki kalabalık tarihleri gizle
+        showticklabels=False, 
         rangeslider=dict(visible=False), 
-        fixedrange=True, # Zoom kilitli (Sıkışmayı önler)
+        fixedrange=True, 
         type='category'
     )
     
@@ -110,8 +100,8 @@ info_box = st.empty()
 chart_placeholder = st.empty()
 
 def render_dashboard():
-    # 1. Metrikler
     if not st.session_state.history_df.empty:
+        # 1. Metrikleri Güncelle
         last_row = st.session_state.history_df.iloc[-1]
         with metric_col.container():
             c1, c2, c3 = st.columns(3)
@@ -120,65 +110,93 @@ def render_dashboard():
             status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
             c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
-        # 2. GRAFİK (SCROLLBAR + GÜZEL TASARIM)
+        # 2. Grafiği Oluştur
         fig = create_figure(st.session_state.history_df)
-        
-        # HTML'e çeviriyoruz ama Streamlit temasını koruyoruz
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # Özel bir HTML kutusu oluşturuyoruz.
-        # Bu kutu, içindeki grafik büyükse otomatik SCROLLBAR çıkarır.
+        # 3. HTML + JAVASCRIPT (SİHİR BURADA)
+        # Bu JS kodu, grafik yüklendiği an scrollbar'ı en sağa çeker.
+        html_code = f"""
+        <html>
+        <head>
+            <style>
+                body {{ margin: 0; background-color: #0e1117; }}
+                /* Scrollbar Tasarımı */
+                ::-webkit-scrollbar {{ height: 12px; }}
+                ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
+                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
+                ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
+            </style>
+        </head>
+        <body>
+            <div id="chart-container" style="width: 100%; overflow-x: auto; padding-bottom: 5px;">
+                {fig_html}
+            </div>
+            <script>
+                // AUTO-SCROLL SCRIPTI
+                // Sayfa yüklendiğinde veya güncellendiğinde çalışır.
+                var container = document.getElementById("chart-container");
+                container.scrollLeft = container.scrollWidth;
+            </script>
+        </body>
+        </html>
+        """
+        
         with chart_placeholder.container():
-            components.html(
-                f"""
-                <style>
-                    body {{ margin: 0; background-color: #0e1117; }}
-                    ::-webkit-scrollbar {{ height: 10px; }}
-                    ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
-                    ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 5px; }}
-                    ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
-                </style>
-                <div style="width: 100%; overflow-x: auto;">
-                    {fig_html}
-                </div>
-                """,
-                height=480, # Scrollbar için yer açtık
-                scrolling=True
-            )
+            components.html(html_code, height=480, scrolling=True)
 
-# --- 1. AÇILIŞ ---
+# --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
     render_dashboard()
     info_box.success("Sistem hazır.")
 else:
     info_box.warning("Veri bekleniyor...")
 
-# --- 2. ANA DÖNGÜ ---
+# --- ANA DÖNGÜ (TURBO MOD) ---
 while True:
+    # 1. Kuyruktaki TÜM verileri topla (Batch Processing)
+    new_data_list = []
+    
     while not data_queue.empty():
         payload = data_queue.get()
         new_count = payload['occupancy']
         status = payload.get('status', 'Normal')
+        
+        # Sadece son gelen verinin saatini alabiliriz veya hepsini işleyebiliriz.
+        # Burada her paketi listeye ekliyoruz.
         tr_now = datetime.now() + timedelta(hours=3)
         full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
-
-        should_save = False
-        if st.session_state.history_df.empty:
-            should_save = True
-        else:
-            last_count = st.session_state.history_df.iloc[-1]['Kişi']
-            if new_count != last_count:
-                should_save = True
         
-        if should_save:
-            new_data = {"Zaman": full_time_str, "Kişi": new_count, "Durum": status}
-            new_row_df = pd.DataFrame([new_data])
-            st.session_state.history_df = pd.concat([st.session_state.history_df, new_row_df], ignore_index=True)
-            
-            write_header = not os.path.exists(CSV_FILE)
-            new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
-            
-            render_dashboard()
-            info_box.success(f"Kayıt Eklendi: {full_time_str}")
+        new_data_list.append({
+            "Zaman": full_time_str, 
+            "Kişi": new_count, 
+            "Durum": status
+        })
 
+    # 2. Eğer yeni veri varsa İŞLE ve ÇİZ
+    if new_data_list:
+        new_rows_df = pd.DataFrame(new_data_list)
+        
+        # Veri tekrarını önlemek için son kontrol
+        # (Aynı saniyede 10 veri gelirse grafik karışmasın)
+        if not st.session_state.history_df.empty:
+            last_val = st.session_state.history_df.iloc[-1]['Kişi']
+            # Sadece son değer farklıysa veya liste kalabalıksa ekle
+            # Basitlik için hepsini ekliyoruz:
+            st.session_state.history_df = pd.concat([st.session_state.history_df, new_rows_df], ignore_index=True)
+        else:
+            st.session_state.history_df = pd.concat([st.session_state.history_df, new_rows_df], ignore_index=True)
+            
+        # CSV'ye Yaz (Append Modu - Performanslı)
+        write_header = not os.path.exists(CSV_FILE)
+        new_rows_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
+        
+        # EKRANI GÜNCELLE
+        render_dashboard()
+        
+        # Son verinin zamanını göster
+        last_time = new_data_list[-1]["Zaman"]
+        info_box.success(f"Güncel Veri Alındı: {last_time}")
+
+    # İşlemciyi yormamak için minik bekleme
     time.sleep(0.1)
