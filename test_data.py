@@ -75,12 +75,12 @@ def create_figure(df):
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
         
-        # Responsive Ayarlar
+        # Responsive: Dış kutu ne derse o boyuta uy
         height=None, 
         width=None,
         autosize=True,
         
-        margin=dict(l=60, r=20, t=30, b=20),
+        margin=dict(l=50, r=20, t=30, b=20),
         
         dragmode=False, 
         paper_bgcolor='#0e1117', 
@@ -100,7 +100,7 @@ def create_figure(df):
     return fig, dynamic_width
 
 # --- ARAYÜZ ---
-st.subheader("📊 Canlı Değişim Grafiği")
+st.subheader("📊 Canlı Değişim Grafiği (V3.0)") # <-- GÜNCELLEME KONTROLÜ İÇİN
 metric_col = st.empty()
 info_box = st.empty()
 chart_placeholder = st.empty()
@@ -126,27 +126,25 @@ def render_dashboard():
             <style>
                 body {{ margin: 0; background-color: #0e1117; overflow: hidden; font-family: sans-serif; }}
                 
-                /* 1. PENCERE (WRAPPER) */
+                /* 1. PENCERE (Görünür Alan - 500px) */
                 #wrapper {{
                     width: 100%;
-                    height: 500px; /* Pencere Boyu Sabit */
+                    height: 500px; 
                     position: relative;
-                    border: 2px solid #444; /* Çerçeve belli olsun */
+                    border: 2px solid #444; 
                     border-radius: 8px;
-                    
-                    /* SCROLLBARLARI ZORLA GÖSTER */
-                    overflow: scroll; 
+                    overflow: auto; /* Scrollbar otomatik çıkacak */
                     -webkit-overflow-scrolling: touch;
                 }}
 
-                /* 2. İÇERİK (CONTENT) */
+                /* 2. İÇERİK KUTUSU (Grafik Alanı - Başlangıçta 800px!) */
                 #content-box {{
                     width: {calc_width}px; 
-                    height: 650px; /* <--- PENCEREDEN DAHA BÜYÜK YAPTIM Kİ SCROLL ÇIKSIN */
+                    height: 800px; /* <--- İŞTE ÇÖZÜM: Pencereden büyük başla! */
                     transform-origin: 0 0;
                 }}
 
-                /* 3. KONTROL PANELİ (SAĞ ÜST) */
+                /* 3. KONTROL PANELİ (Yeni Tasarım) */
                 .control-panel {{
                     position: fixed; 
                     top: 20px;
@@ -221,10 +219,10 @@ def render_dashboard():
                 var wrapper = document.getElementById("wrapper");
                 var contentBox = document.getElementById("content-box");
                 
-                var scrollXKey = "scrollX_Final_V8";
-                var scrollYKey = "scrollY_Final_V8";
-                var widthKey = "width_Final_V8";
-                var heightKey = "height_Final_V8";
+                var scrollXKey = "scrollX_V8";
+                var scrollYKey = "scrollY_V8";
+                var widthKey = "width_V8";
+                var heightKey = "height_V8";
                 
                 // Başlangıç değerleri
                 var baseWidth = {calc_width}; 
@@ -251,8 +249,6 @@ def render_dashboard():
                 function resizeHeight(multiplier) {{
                     var currentH = contentBox.offsetHeight;
                     var newH = currentH * multiplier;
-                    
-                    // Min 400px, Max 5000px
                     if (newH < 400) newH = 400;
                     if (newH > 5000) newH = 5000;
 
@@ -261,7 +257,7 @@ def render_dashboard():
                     sessionStorage.setItem(heightKey, newH);
                 }}
 
-                // --- YÜKLEME ---
+                // --- HAFIZAYI YÜKLE ---
                 var savedW = sessionStorage.getItem(widthKey);
                 if (savedW) contentBox.style.width = savedW + "px";
 
@@ -289,7 +285,7 @@ def render_dashboard():
         """
         
         with chart_placeholder.container():
-            components.html(html_code, height=650)
+            components.html(html_code, height=650) # İframe boyunu da büyüttüm
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
