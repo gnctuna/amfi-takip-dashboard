@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import queue
 import os 
 import plotly.express as px
-import streamlit.components.v1 as components # <-- YENİ SİLAHIMIZ BU
+import streamlit.components.v1 as components
 
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
@@ -52,40 +52,51 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK OLUŞTURUCU ---
+# --- GRAFİK OLUŞTURUCU (ESKİ GÜZEL MAVİ TASARIM) ---
 def create_figure(df):
     if df.empty: return None
     
-    # 1. GENİŞLİK HESABI
-    # Her veri noktasına 40 piksel. 
-    POINT_WIDTH_PX = 40
-    # En az 1000px olsun. Veri arttıkça 5000px, 10000px'e kadar çıkar.
+    # 1. GENİŞLİK HESABI (Sıkışmayı Önler)
+    # Her veri noktasına 35 piksel ayırıyoruz. Grafik sağa doğru uzar.
+    POINT_WIDTH_PX = 35
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
+    # 2. ESKİ GÜZEL TASARIM (Streamlit Mavisi)
+    # color_discrete_sequence=['#29b5e8'] -> İşte o sevdiğin mavi renk bu!
     fig = px.line(
         df, 
         x=df.index, 
         y="Kişi", 
         markers=True,
+        title="",
+        color_discrete_sequence=['#29b5e8'], # Parlak Mavi
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
     fig.update_layout(
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
-        template="plotly_dark",
-        height=450, # Grafik yüksekliği
-        width=dynamic_width, # <--- Devasa genişlik
+        template="plotly_dark", # Koyu tema (ama mavi çizgili)
+        height=450,
+        width=dynamic_width, # Hesaplanan genişlik
         margin=dict(l=20, r=20, t=30, b=20),
+        
+        # Telefondan parmakla sağa-sola kaydırmayı açar
         dragmode="pan",
-        paper_bgcolor='#0e1117', # Streamlit koyu temasına uyumlu renk
-        plot_bgcolor='#0e1117'
+        
+        # Arkaplanı Streamlit ile tam uyumlu yap
+        paper_bgcolor='#0e1117', 
+        plot_bgcolor='#0e1117',
+        
+        # O siyah ızgara çizgilerini yumuşat
+        xaxis=dict(showgrid=True, gridcolor='#333'),
+        yaxis=dict(showgrid=True, gridcolor='#333')
     )
 
     fig.update_xaxes(
-        showticklabels=False, 
+        showticklabels=False, # Alttaki kalabalık tarihleri gizle
         rangeslider=dict(visible=False), 
-        fixedrange=True, # Zoom kilitli
+        fixedrange=True, # Zoom kilitli (Sıkışmayı önler)
         type='category'
     )
     
@@ -109,17 +120,31 @@ def render_dashboard():
             status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
             c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
-        # 2. GRAFİK (IFRAME YÖNTEMİ - KESİN ÇÖZÜM)
+        # 2. GRAFİK (SCROLLBAR + GÜZEL TASARIM)
         fig = create_figure(st.session_state.history_df)
         
-        # Grafiği HTML koduna çeviriyoruz. 
-        # 'cdn' kullanarak gerekli scriptleri içine gömüyoruz.
-        fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True)
+        # HTML'e çeviriyoruz ama Streamlit temasını koruyoruz
+        fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # HTML'i Streamlit'in içine değil, özel bir PENCERE (Component) içine basıyoruz.
-        # Bu pencere taşarsa otomatik scrollbar çıkarır.
+        # Özel bir HTML kutusu oluşturuyoruz.
+        # Bu kutu, içindeki grafik büyükse otomatik SCROLLBAR çıkarır.
         with chart_placeholder.container():
-            components.html(fig_html, height=470, scrolling=True)
+            components.html(
+                f"""
+                <style>
+                    body {{ margin: 0; background-color: #0e1117; }}
+                    ::-webkit-scrollbar {{ height: 10px; }}
+                    ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
+                    ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 5px; }}
+                    ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
+                </style>
+                <div style="width: 100%; overflow-x: auto;">
+                    {fig_html}
+                </div>
+                """,
+                height=480, # Scrollbar için yer açtık
+                scrolling=True
+            )
 
 # --- 1. AÇILIŞ ---
 if not st.session_state.history_df.empty:
