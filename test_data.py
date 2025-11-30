@@ -80,8 +80,6 @@ def create_figure(df):
         width=None,
         autosize=True,
         
-        # --- MARJ AYARI ---
-        # l=60 yaptık ki 3 basamaklı sayılar (250) rahat sığsın
         margin=dict(l=60, r=20, t=30, b=20),
         
         dragmode=False, 
@@ -128,23 +126,23 @@ def render_dashboard():
             <style>
                 body {{ margin: 0; background-color: #0e1117; overflow: hidden; font-family: sans-serif; }}
                 
-                /* DIŞ PENCERE (WRAPPER) */
+                /* DIŞ PENCERE (Görüş Alanı) */
                 #wrapper {{
                     width: 100%;
-                    height: 550px; /* Pencere yüksekliği sabit */
+                    height: 450px; /* <--- PENCEREYİ BİRAZ KÜÇÜLTTÜK Kİ TAŞMA KOLAY OLSUN */
                     position: relative;
-                    border: 1px solid #333;
+                    border: 2px solid #333; /* Sınırları belli olsun */
                     border-radius: 5px;
                     
-                    /* Hem YATAY hem DİKEY taşmayı yönet */
-                    overflow: auto; 
+                    /* SCROLLBAR AYARI */
+                    overflow: scroll; /* <--- ZORLA GÖSTER */
                     -webkit-overflow-scrolling: touch;
                 }}
 
                 /* İÇERİK KUTUSU */
                 #content-box {{
                     width: {calc_width}px; 
-                    height: 500px; /* Başlangıç Yüksekliği */
+                    height: 450px; /* Başlangıçta tam sığsın */
                     transform-origin: 0 0;
                 }}
 
@@ -155,10 +153,11 @@ def render_dashboard():
                     right: 25px;
                     z-index: 99999;
                     display: flex;
-                    flex-direction: column; /* Alt alta dizilsinler */
+                    flex-direction: column;
                     gap: 5px;
-                    padding: 5px;
-                    background-color: rgba(14, 17, 23, 0.8);
+                    padding: 8px;
+                    background-color: rgba(14, 17, 23, 0.9);
+                    border: 1px solid #444;
                     border-radius: 10px;
                 }}
                 
@@ -166,18 +165,19 @@ def render_dashboard():
                     display: flex;
                     gap: 5px;
                     align-items: center;
+                    justify-content: flex-end;
                 }}
 
-                .label {{ color: #aaa; font-size: 10px; margin-right: 5px; }}
+                .label {{ color: #ccc; font-size: 10px; margin-right: 5px; font-weight: bold; }}
                 
                 .btn {{
-                    background-color: rgba(41, 181, 232, 0.1);
+                    background-color: #1e1e1e;
                     color: #29b5e8;
                     border: 1px solid #29b5e8;
                     border-radius: 4px;
-                    width: 30px;
-                    height: 30px;
-                    font-size: 16px;
+                    width: 32px;
+                    height: 32px;
+                    font-size: 18px;
                     font-weight: bold;
                     cursor: pointer;
                     display: flex;
@@ -187,23 +187,24 @@ def render_dashboard():
                 }}
                 .btn:active {{ background-color: #29b5e8; color: white; }}
 
-                /* Scrollbar */
-                ::-webkit-scrollbar {{ width: 12px; height: 12px; }}
-                ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
-                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
-                ::-webkit-scrollbar-corner {{ background: #1e1e1e; }}
+                /* GÖRÜNÜR SCROLLBAR TASARIMI */
+                ::-webkit-scrollbar {{ width: 15px; height: 15px; }} /* Daha kalın yaptık */
+                ::-webkit-scrollbar-track {{ background: #111; }}
+                ::-webkit-scrollbar-thumb {{ background: #29b5e8; border-radius: 8px; border: 3px solid #111; }} /* MAVİ ÇUBUK */
+                ::-webkit-scrollbar-thumb:hover {{ background: #55cfff; }}
+                ::-webkit-scrollbar-corner {{ background: #111; }}
             </style>
         </head>
         <body>
             <div id="wrapper">
                 <div class="control-panel">
                     <div class="btn-group">
-                        <span class="label">GENİŞLİK</span>
+                        <span class="label">↔ GENİŞLİK</span>
                         <div class="btn" onclick="resizeWidth(0.8)">-</div>
                         <div class="btn" onclick="resizeWidth(1.2)">+</div>
                     </div>
                     <div class="btn-group">
-                        <span class="label">YÜKSEKLİK</span>
+                        <span class="label">↕ YÜKSEKLİK</span>
                         <div class="btn" onclick="resizeHeight(0.8)">-</div>
                         <div class="btn" onclick="resizeHeight(1.2)">+</div>
                     </div>
@@ -218,14 +219,11 @@ def render_dashboard():
                 var wrapper = document.getElementById("wrapper");
                 var contentBox = document.getElementById("content-box");
                 
-                var scrollXKey = "scrollX_V6";
-                var scrollYKey = "scrollY_V6";
-                var widthKey = "width_V6";
-                var heightKey = "height_V6";
+                var scrollXKey = "scrollX_V7";
+                var scrollYKey = "scrollY_V7";
+                var widthKey = "width_V7";
+                var heightKey = "height_V7";
                 
-                // Başlangıç değerleri
-                var baseWidth = {calc_width}; 
-
                 // --- GENİŞLİK AYARI ---
                 function resizeWidth(multiplier) {{
                     var currentW = contentBox.offsetWidth;
@@ -238,14 +236,14 @@ def render_dashboard():
                     sessionStorage.setItem(widthKey, newW);
                 }}
 
-                // --- YÜKSEKLİK AYARI (YENİ!) ---
+                // --- YÜKSEKLİK AYARI ---
                 function resizeHeight(multiplier) {{
                     var currentH = contentBox.offsetHeight;
                     var newH = currentH * multiplier;
                     
-                    // En az 300px, En çok 2000px
-                    if (newH < 300) newH = 300;
-                    if (newH > 2000) newH = 2000;
+                    // Eğer yeni yükseklik pencereden (450px) küçükse, en az pencere kadar olsun
+                    if (newH < 450) newH = 450;
+                    if (newH > 3000) newH = 3000;
 
                     contentBox.style.height = newH + "px";
                     redrawPlot();
@@ -271,14 +269,12 @@ def render_dashboard():
                 
                 setTimeout(function() {{
                     redrawPlot();
-                    // Scroll konumlarını yükle
                     if (savedX !== null) wrapper.scrollLeft = parseInt(savedX);
                     else wrapper.scrollLeft = wrapper.scrollWidth;
 
                     if (savedY !== null) wrapper.scrollTop = parseInt(savedY);
                 }}, 200);
 
-                // Scroll dinleyicisi
                 wrapper.addEventListener("scroll", function() {{
                     sessionStorage.setItem(scrollXKey, wrapper.scrollLeft);
                     sessionStorage.setItem(scrollYKey, wrapper.scrollTop);
@@ -288,8 +284,9 @@ def render_dashboard():
         </html>
         """
         
+        # iframe yüksekliği wrapper'dan büyük olmalı ki scrollbarlar görünsün
         with chart_placeholder.container():
-            components.html(html_code, height=580)
+            components.html(html_code, height=600)
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
