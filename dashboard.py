@@ -47,7 +47,6 @@ if 'history_df' not in st.session_state:
     if os.path.exists(CSV_FILE):
         try:
             df = pd.read_csv(CSV_FILE)
-            # Sayısal veriyi garantiye al (Hata önleyici)
             df['Kişi'] = pd.to_numeric(df['Kişi'], errors='coerce').fillna(0).astype(int)
             st.session_state.history_df = df.tail(MAX_DISPLAY_ROWS)
         except:
@@ -114,20 +113,36 @@ def render_dashboard():
         fig = create_figure(st.session_state.history_df)
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
+        # --- GÜNCELLENEN KISIM: ZAMAN AYARLI SCROLL ---
+        html_code = f"""
+        <html>
+        <head>
+            <style>
+                body {{ margin: 0; background-color: #0e1117; }}
+                ::-webkit-scrollbar {{ height: 12px; }}
+                ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
+                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
+                ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
+            </style>
+        </head>
+        <body>
+            <div id="chart-container" style="width: 100%; overflow-x: auto; padding-bottom: 5px;">
+                {fig_html}
+            </div>
+            <script>
+                // Tarayıcıya 100ms beklemesi gerektiğini söylüyoruz.
+                // Bu süre içinde grafik çiziliyor, SONRA scroll kayıyor.
+                setTimeout(function() {{
+                    var container = document.getElementById("chart-container");
+                    container.scrollLeft = container.scrollWidth;
+                }}, 100);
+            </script>
+        </body>
+        </html>
+        """
+        
         with chart_placeholder.container():
-            components.html(
-                f"""
-                <style>
-                    body {{ margin: 0; background-color: #0e1117; }}
-                    ::-webkit-scrollbar {{ height: 12px; }}
-                    ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
-                    ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
-                    ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
-                </style>
-                <div style="width: 100%; overflow-x: auto;">{fig_html}</div>
-                """,
-                height=480, scrolling=True
-            )
+            components.html(html_code, height=480, scrolling=True)
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
@@ -139,9 +154,7 @@ else:
 while True:
     if not data_queue.empty():
         
-        # --- REFERANS ALMA ---
         if not st.session_state.history_df.empty:
-            # Son sayıyı al ve INT (Tamsayı) yap ki karşılaştırma hatasız olsun
             running_last_count = int(st.session_state.history_df.iloc[-1]['Kişi'])
         else:
             running_last_count = -1 
@@ -151,11 +164,9 @@ while True:
         
         while not data_queue.empty():
             payload = data_queue.get()
-            # Gelen veriyi de INT yapıyoruz
             new_count = int(payload['occupancy'])
             status = payload.get('status', 'Normal')
             
-            # --- KESİN FİLTRE ---
             if new_count != running_last_count:
                 tr_now = datetime.now() + timedelta(hours=3)
                 full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
@@ -172,13 +183,10 @@ while True:
             else:
                 skipped_count += 1
         
-        # Ekran Güncelleme
         if changes_detected:
             render_dashboard()
             info_box.success(f"Yeni Veri Eklendi! (Atlanan Tekrar: {skipped_count})")
         elif skipped_count > 0:
-            # Eğer sadece tekrar eden veri geldiyse, kullanıcıya sistemin çalıştığını hissettir
-            # ama grafiği çizme.
             info_box.info(f"Sistem aktif. {skipped_count} adet aynı veri filtrelendi.")
 
     time.sleep(0.1)
