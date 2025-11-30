@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import queue
 import os 
 import plotly.express as px
+import streamlit.components.v1 as components # <-- YENİ SİLAHIMIZ BU
 
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
@@ -51,15 +52,14 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK FONKSİYONU ---
+# --- GRAFİK OLUŞTURUCU ---
 def create_figure(df):
     if df.empty: return None
     
-    # 1. GENİŞLİK HESABI (Sıkışmayı Önleyen Formül)
-    # Her bir veri noktası için 40 piksel ayırıyoruz.
-    # 10 veri varsa 400px, 100 veri varsa 4000px genişlik olur.
+    # 1. GENİŞLİK HESABI
+    # Her veri noktasına 40 piksel. 
     POINT_WIDTH_PX = 40
-    # En az 1000 piksel olsun ki boşken kötü durmasın
+    # En az 1000px olsun. Veri arttıkça 5000px, 10000px'e kadar çıkar.
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
     fig = px.line(
@@ -67,7 +67,6 @@ def create_figure(df):
         x=df.index, 
         y="Kişi", 
         markers=True,
-        # Mouse ile üzerine gelince bilgileri göster
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
@@ -75,30 +74,28 @@ def create_figure(df):
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
-        height=500,
-        width=dynamic_width, # <--- GRAFİĞİ ZORLA UZATIYORUZ
+        height=450, # Grafik yüksekliği
+        width=dynamic_width, # <--- Devasa genişlik
         margin=dict(l=20, r=20, t=30, b=20),
-        
-        # Telefonda parmakla sağa-sola kaydırmayı açar (Pan)
-        dragmode="pan" 
+        dragmode="pan",
+        paper_bgcolor='#0e1117', # Streamlit koyu temasına uyumlu renk
+        plot_bgcolor='#0e1117'
     )
 
     fig.update_xaxes(
-        showticklabels=False,    # Alttaki tarih yazılarını GİZLE
-        rangeslider=dict(visible=False), # O küçük alt grafiği GİZLE
-        fixedrange=True,         # Zoom yapmayı KİLİTLE (Sıkışmayı önler)
+        showticklabels=False, 
+        rangeslider=dict(visible=False), 
+        fixedrange=True, # Zoom kilitli
         type='category'
     )
     
     fig.update_yaxes(fixedrange=True)
     return fig
 
-# --- ARAYÜZ YERLEŞİMİ ---
+# --- ARAYÜZ ---
 st.subheader("📊 Canlı Değişim Grafiği")
 metric_col = st.empty()
 info_box = st.empty()
-
-# Grafik Kutusu
 chart_placeholder = st.empty()
 
 def render_dashboard():
@@ -112,14 +109,17 @@ def render_dashboard():
             status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
             c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
-        # 2. GRAFİK ÇİZİMİ
+        # 2. GRAFİK (IFRAME YÖNTEMİ - KESİN ÇÖZÜM)
         fig = create_figure(st.session_state.history_df)
         
-        # --- KRİTİK NOKTA BURASI ---
-        # use_container_width=False yapıyoruz.
-        # Bu sayede Streamlit grafiği ekrana sıkıştırmaz.
-        # Grafik ekrandan taşacağı için tarayıcı OTOMATİK OLARAK scrollbar koyar.
-        chart_placeholder.plotly_chart(fig, use_container_width=False) 
+        # Grafiği HTML koduna çeviriyoruz. 
+        # 'cdn' kullanarak gerekli scriptleri içine gömüyoruz.
+        fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True)
+        
+        # HTML'i Streamlit'in içine değil, özel bir PENCERE (Component) içine basıyoruz.
+        # Bu pencere taşarsa otomatik scrollbar çıkarır.
+        with chart_placeholder.container():
+            components.html(fig_html, height=470, scrolling=True)
 
 # --- 1. AÇILIŞ ---
 if not st.session_state.history_df.empty:
