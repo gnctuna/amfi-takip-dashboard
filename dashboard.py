@@ -46,17 +46,19 @@ start_mqtt()
 if 'history_df' not in st.session_state:
     if os.path.exists(CSV_FILE):
         try:
-            st.session_state.history_df = pd.read_csv(CSV_FILE).tail(MAX_DISPLAY_ROWS)
+            df = pd.read_csv(CSV_FILE)
+            # Sayısal veriyi garantiye al (Hata önleyici)
+            df['Kişi'] = pd.to_numeric(df['Kişi'], errors='coerce').fillna(0).astype(int)
+            st.session_state.history_df = df.tail(MAX_DISPLAY_ROWS)
         except:
             st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK OLUŞTURUCU (MAVİ + SCROLLBAR) ---
+# --- GRAFİK OLUŞTURUCU ---
 def create_figure(df):
     if df.empty: return None
     
-    # GENİŞLİK: Veri başına 35 piksel. Veri arttıkça uzar.
     POINT_WIDTH_PX = 35
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
@@ -65,7 +67,7 @@ def create_figure(df):
         x=df.index, 
         y="Kişi", 
         markers=True,
-        color_discrete_sequence=['#29b5e8'], # Mavi Renk
+        color_discrete_sequence=['#29b5e8'], 
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
@@ -112,62 +114,48 @@ def render_dashboard():
         fig = create_figure(st.session_state.history_df)
         fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # Scrollbar otomatik en sağa kaysın diye JS ekliyoruz
-        html_code = f"""
-        <html>
-        <head>
-            <style>
-                body {{ margin: 0; background-color: #0e1117; }}
-                ::-webkit-scrollbar {{ height: 12px; }}
-                ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
-                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
-                ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
-            </style>
-        </head>
-        <body>
-            <div id="chart-container" style="width: 100%; overflow-x: auto; padding-bottom: 5px;">
-                {fig_html}
-            </div>
-            <script>
-                var container = document.getElementById("chart-container");
-                container.scrollLeft = container.scrollWidth;
-            </script>
-        </body>
-        </html>
-        """
-        
         with chart_placeholder.container():
-            components.html(html_code, height=480, scrolling=True)
+            components.html(
+                f"""
+                <style>
+                    body {{ margin: 0; background-color: #0e1117; }}
+                    ::-webkit-scrollbar {{ height: 12px; }}
+                    ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
+                    ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
+                    ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
+                </style>
+                <div style="width: 100%; overflow-x: auto;">{fig_html}</div>
+                """,
+                height=480, scrolling=True
+            )
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
     render_dashboard()
-    info_box.success("Sistem hazır.")
 else:
     info_box.warning("Veri bekleniyor...")
 
 # --- ANA DÖNGÜ ---
 while True:
-    # Kuyruktaki verileri kontrol et
     if not data_queue.empty():
         
-        # --- KRİTİK DÜZELTME: REFERANS NOKTASI ---
-        # Döngüye girmeden önce en son bildiğimiz sayıyı alıyoruz.
+        # --- REFERANS ALMA ---
         if not st.session_state.history_df.empty:
-            running_last_count = st.session_state.history_df.iloc[-1]['Kişi']
+            # Son sayıyı al ve INT (Tamsayı) yap ki karşılaştırma hatasız olsun
+            running_last_count = int(st.session_state.history_df.iloc[-1]['Kişi'])
         else:
-            running_last_count = -1 # Hiç veri yoksa
+            running_last_count = -1 
             
         changes_detected = False
+        skipped_count = 0
         
-        # Kuyruktaki TÜM mesajları tek tek işle
         while not data_queue.empty():
             payload = data_queue.get()
-            new_count = payload['occupancy']
+            # Gelen veriyi de INT yapıyoruz
+            new_count = int(payload['occupancy'])
             status = payload.get('status', 'Normal')
             
-            # --- FİLTRE MANTIĞI ---
-            # Sadece sayı, elimizdeki son referanstan farklıysa kaydet.
+            # --- KESİN FİLTRE ---
             if new_count != running_last_count:
                 tr_now = datetime.now() + timedelta(hours=3)
                 full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
@@ -176,17 +164,21 @@ while True:
                 new_row_df = pd.DataFrame([new_data])
                 st.session_state.history_df = pd.concat([st.session_state.history_df, new_row_df], ignore_index=True)
                 
-                # CSV'ye Yaz
                 write_header = not os.path.exists(CSV_FILE)
                 new_row_df.to_csv(CSV_FILE, mode='a', header=write_header, index=False)
                 
-                # REFERANSI GÜNCELLE! (Artık yeni son sayımız bu)
                 running_last_count = new_count 
                 changes_detected = True
+            else:
+                skipped_count += 1
         
-        # Eğer en az bir değişiklik olduysa ekranı yenile
+        # Ekran Güncelleme
         if changes_detected:
             render_dashboard()
-            info_box.success(f"Yeni Veri Algılandı.")
+            info_box.success(f"Yeni Veri Eklendi! (Atlanan Tekrar: {skipped_count})")
+        elif skipped_count > 0:
+            # Eğer sadece tekrar eden veri geldiyse, kullanıcıya sistemin çalıştığını hissettir
+            # ama grafiği çizme.
+            info_box.info(f"Sistem aktif. {skipped_count} adet aynı veri filtrelendi.")
 
     time.sleep(0.1)
