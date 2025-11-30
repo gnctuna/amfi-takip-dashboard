@@ -58,6 +58,8 @@ if 'history_df' not in st.session_state:
 def create_figure(df):
     if df.empty: return None
     
+    # Python tarafında başlangıç genişliği hesabı
+    # Ama asıl kontrolü HTML/JS tarafına bırakacağız
     POINT_WIDTH_PX = 40
     dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
 
@@ -74,8 +76,13 @@ def create_figure(df):
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
-        height=450,
-        width=dynamic_width,
+        
+        # Yükseklik ve Genişliği 'None' yapıyoruz ki, 
+        # dışarıdaki HTML kutusu ne kadar büyürse grafik de o kadar büyüsün (Responsive)
+        height=None, 
+        width=None,
+        autosize=True,
+        
         margin=dict(l=20, r=20, t=30, b=20),
         dragmode=False, 
         paper_bgcolor='#0e1117', 
@@ -92,7 +99,7 @@ def create_figure(df):
     )
     
     fig.update_yaxes(fixedrange=True)
-    return fig
+    return fig, dynamic_width
 
 # --- ARAYÜZ ---
 st.subheader("📊 Canlı Değişim Grafiği")
@@ -110,10 +117,14 @@ def render_dashboard():
             status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
             c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
-        fig = create_figure(st.session_state.history_df)
-        fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
+        # Grafiği oluştur (fig ve genişlik dönüyor)
+        fig, calc_width = create_figure(st.session_state.history_df)
         
-        # --- HTML + JS (SABİT BUTONLAR) ---
+        # Grafiğe SABİT bir ID veriyoruz: "amfi_chart"
+        # Böylece JavaScript ile bu grafiği bulup boyutunu değiştirebileceğiz.
+        fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
+        
+        # HTML Kodu
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -122,40 +133,35 @@ def render_dashboard():
             <style>
                 body {{ margin: 0; background-color: #0e1117; overflow: hidden; font-family: sans-serif; }}
                 
-                /* Kapsayıcı Alan */
+                /* 1. DIŞ PENCERE */
                 #wrapper {{
+                    width: 100%;
+                    height: 550px; /* Pencere yüksekliği sabit */
                     position: relative;
-                    width: 100%;
-                    height: 500px;
-                }}
-
-                /* Kayan Grafik Alanı */
-                #chart-scroll-area {{
-                    width: 100%;
-                    height: 100%;
-                    overflow-x: auto; 
-                    overflow-y: hidden;
-                    padding-bottom: 5px;
+                    border: 1px solid #333;
+                    border-radius: 5px;
+                    /* Hem Yatay Hem Dikey Scrollbar Çıksın */
+                    overflow: auto; 
                     -webkit-overflow-scrolling: touch;
-                    cursor: grab;
                 }}
 
-                /* Zoomlanacak İçerik */
-                #chart-content {{
-                    transform-origin: 0 0;
+                /* 2. İÇERİK KUTUSU */
+                #content-box {{
+                    /* Başlangıç genişliği Python'dan geliyor */
+                    width: {calc_width}px; 
+                    height: 520px; /* Grafiğin yüksekliği */
                 }}
 
-                /* --- SABİT BUTONLAR --- */
-                /* 'position: fixed' sayesinde scroll'dan etkilenmezler */
+                /* SABİT BUTONLAR (Ekrana Çivili) */
                 .zoom-controls {{
                     position: fixed; 
                     top: 15px;
-                    right: 20px;
-                    z-index: 9999; /* En üstte durması için */
+                    right: 25px;
+                    z-index: 99999;
                     display: flex;
                     gap: 8px;
-                    background-color: rgba(14, 17, 23, 0.8); /* Arkası hafif siyah olsun ki çizgiler karışmasın */
                     padding: 5px;
+                    background-color: rgba(14, 17, 23, 0.7);
                     border-radius: 20px;
                 }}
                 
@@ -164,83 +170,95 @@ def render_dashboard():
                     color: #29b5e8;
                     border: 1px solid #29b5e8;
                     border-radius: 50%;
-                    width: 32px;
-                    height: 32px;
-                    font-size: 18px;
+                    width: 35px;
+                    height: 35px;
+                    font-size: 20px;
                     font-weight: bold;
                     cursor: pointer;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     user-select: none;
-                    transition: all 0.2s;
-                    box-shadow: 0 2px 5px rgba(0,0,0,0.5);
                 }}
-                
-                .btn:active {{
-                    background-color: #29b5e8;
-                    color: white;
-                    transform: scale(0.9);
-                }}
+                .btn:active {{ background-color: #29b5e8; color: white; }}
 
                 /* Scrollbar */
-                ::-webkit-scrollbar {{ height: 12px; }}
+                ::-webkit-scrollbar {{ width: 12px; height: 12px; }}
                 ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
                 ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
-                ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
             </style>
         </head>
         <body>
             <div id="wrapper">
                 <div class="zoom-controls">
-                    <div class="btn" onclick="changeZoom(-0.1)">-</div>
-                    <div class="btn" onclick="changeZoom(0.1)">+</div>
+                    <div class="btn" onclick="resizeChart(0.8)">-</div>
+                    <div class="btn" onclick="resizeChart(1.2)">+</div>
                 </div>
 
-                <div id="chart-scroll-area">
-                    <div id="chart-content">
-                        {fig_html}
-                    </div>
+                <div id="content-box">
+                    {fig_html}
                 </div>
             </div>
 
             <script>
-                var scrollArea = document.getElementById("chart-scroll-area");
-                var content = document.getElementById("chart-content");
+                var wrapper = document.getElementById("wrapper");
+                var contentBox = document.getElementById("content-box");
                 
-                var scrollKey = "scrollPos_Fixed_V5";
-                var zoomKey = "zoomLevel_Fixed_V5";
+                var scrollXKey = "scrollX_TrueResize_V1";
+                var widthKey = "chartWidth_TrueResize_V1";
+                
+                // Başlangıç genişliği (Python'dan gelen değer)
+                var baseWidth = {calc_width}; 
 
-                // --- ZOOM ---
-                var currentZoom = parseFloat(sessionStorage.getItem(zoomKey)) || 1.0;
-                
-                function applyZoom() {{
-                    content.style.zoom = currentZoom;
-                    sessionStorage.setItem(zoomKey, currentZoom);
-                }}
-                
-                function changeZoom(delta) {{
-                    currentZoom += delta;
-                    if (currentZoom < 0.2) currentZoom = 0.2;
-                    if (currentZoom > 3.0) currentZoom = 3.0;
-                    applyZoom();
-                }}
-                
-                applyZoom();
-
-                // --- HAFIZALI SCROLL ---
-                var savedPos = sessionStorage.getItem(scrollKey);
-                
-                setTimeout(function() {{
-                    if (savedPos !== null && savedPos !== "undefined") {{
-                        scrollArea.scrollLeft = parseInt(savedPos);
-                    }} else {{
-                        scrollArea.scrollLeft = scrollArea.scrollWidth;
+                // --- RESIZE FONKSİYONU ---
+                // Zoom değil, gerçekten genişliği değiştiriyoruz.
+                function resizeChart(multiplier) {{
+                    // Mevcut genişliği al
+                    var currentWidth = contentBox.offsetWidth;
+                    var newWidth = currentWidth * multiplier;
+                    
+                    // Sınırlar (En az 500px, En çok 50.000px)
+                    if (newWidth < 500) newWidth = 500;
+                    if (newWidth > 50000) newWidth = 50000;
+                    
+                    // 1. Kutunun genişliğini değiştir
+                    contentBox.style.width = newWidth + "px";
+                    
+                    // 2. Plotly'ye "Yeniden Çiz" emri ver (BU ÇOK ÖNEMLİ)
+                    // Bu sayede koordinatlar güncellenir ve Tooltip çalışır.
+                    var plotDiv = document.getElementById('amfi_chart');
+                    if (plotDiv && window.Plotly) {{
+                        Plotly.Plots.resize(plotDiv);
                     }}
-                }}, 100);
+                    
+                    // Hafızaya kaydet
+                    sessionStorage.setItem(widthKey, newWidth);
+                }}
 
-                scrollArea.addEventListener("scroll", function() {{
-                    sessionStorage.setItem(scrollKey, scrollArea.scrollLeft);
+                // --- HAFIZA YÖNETİMİ ---
+                // 1. Kaydedilmiş genişliği geri yükle
+                var savedWidth = sessionStorage.getItem(widthKey);
+                if (savedWidth) {{
+                     contentBox.style.width = savedWidth + "px";
+                }}
+
+                // 2. Kaydedilmiş Scroll Konumunu geri yükle
+                var savedX = sessionStorage.getItem(scrollXKey);
+                setTimeout(function() {{
+                    // Plotly'nin çizilmesi için minik bekleme
+                    var plotDiv = document.getElementById('amfi_chart');
+                    if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
+
+                    if (savedX !== null) {{
+                        wrapper.scrollLeft = parseInt(savedX);
+                    }} else {{
+                        wrapper.scrollLeft = wrapper.scrollWidth;
+                    }}
+                }}, 200);
+
+                // Scroll dinleyicisi
+                wrapper.addEventListener("scroll", function() {{
+                    sessionStorage.setItem(scrollXKey, wrapper.scrollLeft);
                 }});
             </script>
         </body>
@@ -248,7 +266,7 @@ def render_dashboard():
         """
         
         with chart_placeholder.container():
-            components.html(html_code, height=520)
+            components.html(html_code, height=560) # Yüksekliği biraz artırdık
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
