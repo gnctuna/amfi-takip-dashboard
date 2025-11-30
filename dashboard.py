@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import queue
 import os 
 import plotly.express as px
+import streamlit.components.v1 as components
 
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
@@ -53,11 +54,14 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK OLUŞTURUCU (AKILLI SÜRÜKLEME MODU) ---
+# --- GRAFİK OLUŞTURUCU ---
 def create_figure(df):
     if df.empty: return None
     
-    # Grafiği çiz
+    # GENİŞLİK AYARI: Her veri için 40px
+    POINT_WIDTH_PX = 40
+    dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
+
     fig = px.line(
         df, 
         x=df.index, 
@@ -67,25 +71,18 @@ def create_figure(df):
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
-    # BAŞLANGIÇ GÖRÜNÜMÜ: Sadece son 30 veriyi göster
-    # Bu sayede grafik ilk açıldığında sıkışık olmaz.
-    total_points = len(df)
-    start_view = max(0, total_points - 30)
-    end_view = total_points
-
     fig.update_layout(
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
         height=450,
+        width=dynamic_width, # Genişliği zorluyoruz
         margin=dict(l=20, r=20, t=30, b=20),
         
-        # --- SİHİRLİ KOMUTLAR BURADA ---
-        dragmode="pan", # Varsayılan hareket: TUT ve SÜRÜKLE (Harita gibi)
-        
-        # 'uirevision': Bu değer değişmediği sürece, Streamlit sayfayı yenilese bile
-        # kullanıcının zoom/pan (kaydırma) konumunu SIFIRLAMAZ. Olduğu yerde bırakır.
-        uirevision='sabit_deger', 
+        # --- ÖNEMLİ: DRAGMODE KAPALI ---
+        # Grafiğin kendi içindeki sürüklemeyi kapatıyoruz ki
+        # dışarıdaki HTML kutusunun kaydırması çalışsın.
+        dragmode=False, 
         
         paper_bgcolor='#0e1117', 
         plot_bgcolor='#0e1117',
@@ -96,17 +93,11 @@ def create_figure(df):
     fig.update_xaxes(
         showticklabels=False, 
         rangeslider=dict(visible=False), 
-        
-        # Başlangıçta gösterilecek aralık (Son 30)
-        # Kullanıcı bunu sürükleyerek değiştirebilir ve kod bunu HATIRLAR.
-        range=[start_view, end_view],
-        
+        fixedrange=True, # Plotly'nin zoom'unu kilitle
         type='category'
     )
     
-    # Y ekseni sabit kalsın, sadece X ekseni kaysın
     fig.update_yaxes(fixedrange=True)
-    
     return fig
 
 # --- ARAYÜZ ---
@@ -127,11 +118,70 @@ def render_dashboard():
 
         # Grafiği Oluştur
         fig = create_figure(st.session_state.history_df)
+        fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # HTML/Iframe YOK! Doğrudan Streamlit kullanıyoruz.
-        # Bu sayede iPhone'da %100 çalışır.
+        # --- HTML + JS (HAFIZALI SCROLLBAR) ---
+        html_code = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {{ margin: 0; background-color: #0e1117; overflow: hidden; }}
+                
+                #chart-wrapper {{
+                    width: 100%;
+                    overflow-x: auto; /* Yatay Scrollbar */
+                    overflow-y: hidden;
+                    padding-bottom: 5px;
+                    -webkit-overflow-scrolling: touch; /* iPhone Sürükleme Desteği */
+                    cursor: grab;
+                }}
+                
+                #chart-wrapper:active {{
+                    cursor: grabbing;
+                }}
+
+                /* Scrollbar Tasarımı */
+                ::-webkit-scrollbar {{ height: 12px; }}
+                ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
+                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
+                ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
+            </style>
+        </head>
+        <body>
+            <div id="chart-wrapper">
+                {fig_html}
+            </div>
+
+            <script>
+                var container = document.getElementById("chart-wrapper");
+                var storageKey = "scrollPos_Final_V3"; 
+
+                // 1. HAFIZADAN OKU
+                var savedPos = sessionStorage.getItem(storageKey);
+                
+                // Sayfa ilk yüklendiğinde grafik çizilene kadar bekle
+                setTimeout(function() {{
+                    if (savedPos !== null && savedPos !== "undefined") {{
+                        container.scrollLeft = parseInt(savedPos);
+                    }} else {{
+                        // Kayıt yoksa en sağa git
+                        container.scrollLeft = container.scrollWidth;
+                    }}
+                }}, 100);
+
+                // 2. HAFIZAYA YAZ
+                container.addEventListener("scroll", function() {{
+                    sessionStorage.setItem(storageKey, container.scrollLeft);
+                }});
+            </script>
+        </body>
+        </html>
+        """
+        
         with chart_placeholder.container():
-            st.plotly_chart(fig, use_container_width=True)
+            components.html(html_code, height=480)
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
@@ -156,6 +206,7 @@ while True:
             new_count = int(payload['occupancy'])
             status = payload.get('status', 'Normal')
             
+            # --- FİLTRE: Sadece Değişimi Kaydet ---
             if new_count != running_last_count:
                 tr_now = datetime.now() + timedelta(hours=3)
                 full_time_str = tr_now.strftime('%Y-%m-%d %H:%M:%S')
