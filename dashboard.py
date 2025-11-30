@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 import queue
 import os 
 import plotly.express as px
-import streamlit.components.v1 as components
 
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
@@ -54,13 +53,11 @@ if 'history_df' not in st.session_state:
     else:
         st.session_state.history_df = pd.DataFrame(columns=['Zaman', 'Kişi', 'Durum'])
 
-# --- GRAFİK OLUŞTURUCU ---
+# --- GRAFİK OLUŞTURUCU (AKILLI SÜRÜKLEME MODU) ---
 def create_figure(df):
     if df.empty: return None
     
-    POINT_WIDTH_PX = 35
-    dynamic_width = max(1000, len(df) * POINT_WIDTH_PX)
-
+    # Grafiği çiz
     fig = px.line(
         df, 
         x=df.index, 
@@ -70,14 +67,26 @@ def create_figure(df):
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, df.index.name: False}
     )
     
+    # BAŞLANGIÇ GÖRÜNÜMÜ: Sadece son 30 veriyi göster
+    # Bu sayede grafik ilk açıldığında sıkışık olmaz.
+    total_points = len(df)
+    start_view = max(0, total_points - 30)
+    end_view = total_points
+
     fig.update_layout(
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
         height=450,
-        width=dynamic_width, 
         margin=dict(l=20, r=20, t=30, b=20),
-        dragmode="pan", 
+        
+        # --- SİHİRLİ KOMUTLAR BURADA ---
+        dragmode="pan", # Varsayılan hareket: TUT ve SÜRÜKLE (Harita gibi)
+        
+        # 'uirevision': Bu değer değişmediği sürece, Streamlit sayfayı yenilese bile
+        # kullanıcının zoom/pan (kaydırma) konumunu SIFIRLAMAZ. Olduğu yerde bırakır.
+        uirevision='sabit_deger', 
+        
         paper_bgcolor='#0e1117', 
         plot_bgcolor='#0e1117',
         xaxis=dict(showgrid=True, gridcolor='#333'),
@@ -87,11 +96,17 @@ def create_figure(df):
     fig.update_xaxes(
         showticklabels=False, 
         rangeslider=dict(visible=False), 
-        fixedrange=True, 
+        
+        # Başlangıçta gösterilecek aralık (Son 30)
+        # Kullanıcı bunu sürükleyerek değiştirebilir ve kod bunu HATIRLAR.
+        range=[start_view, end_view],
+        
         type='category'
     )
     
+    # Y ekseni sabit kalsın, sadece X ekseni kaysın
     fig.update_yaxes(fixedrange=True)
+    
     return fig
 
 # --- ARAYÜZ ---
@@ -110,61 +125,13 @@ def render_dashboard():
             status_icon = "🔴" if last_row['Kişi'] > 15 else "🟢"
             c3.metric("Durum", f"{last_row['Durum']} {status_icon}")
 
+        # Grafiği Oluştur
         fig = create_figure(st.session_state.history_df)
-        fig_html = fig.to_html(include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False})
         
-        # --- İŞTE IPHONE DÜZELTMESİ BURADA ---
-        html_code = f"""
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                body {{ margin: 0; background-color: #0e1117; }}
-                
-                /* iPhone için pürüzsüz kaydırma */
-                #chart-container {{
-                    width: 100%; 
-                    overflow-x: auto; 
-                    padding-bottom: 5px;
-                    -webkit-overflow-scrolling: touch; /* <--- SİHİRLİ KOD BU */
-                    cursor: grab;
-                }}
-
-                /* Scrollbar Tasarımı */
-                ::-webkit-scrollbar {{ height: 12px; }}
-                ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
-                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; }}
-                ::-webkit-scrollbar-thumb:hover {{ background: #888; }}
-            </style>
-        </head>
-        <body>
-            <div id="chart-container">
-                {fig_html}
-            </div>
-            <script>
-                var container = document.getElementById("chart-container");
-                var storageKey = "scrollPos_Mobile_V2"; 
-
-                // HAFIZA: Kaldığı yerden devam et
-                var savedPos = sessionStorage.getItem(storageKey);
-                
-                if (savedPos !== null) {{
-                    container.scrollLeft = parseInt(savedPos);
-                }} else {{
-                    container.scrollLeft = container.scrollWidth;
-                }}
-
-                container.onscroll = function() {{
-                    sessionStorage.setItem(storageKey, container.scrollLeft);
-                }};
-            </script>
-        </body>
-        </html>
-        """
-        
-        # scrolling=True parametresi Iframe'in kendisinin de kaydırılabilir olmasını sağlar
+        # HTML/Iframe YOK! Doğrudan Streamlit kullanıyoruz.
+        # Bu sayede iPhone'da %100 çalışır.
         with chart_placeholder.container():
-            components.html(html_code, height=480, scrolling=True)
+            st.plotly_chart(fig, use_container_width=True)
 
 # --- İLK AÇILIŞ ---
 if not st.session_state.history_df.empty:
