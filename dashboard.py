@@ -99,14 +99,14 @@ def create_figure(df):
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True}
     )
     
-    # Basamaklı çizim (Step Line) - Keskin hatlar için
-    fig.update_traces(line_shape='hv') 
+    # DEĞİŞİKLİK: 'hv' modu kaldırıldı. Artık varsayılan (Linear) modda.
+    # fig.update_traces(line_shape='hv') <--- BU SATIR SİLİNDİ
     
     fig.update_layout(
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
-        height=None, # Yükseklik artık dışarıdaki HTML tarafından kontrol edilecek
+        height=None, 
         width=None,
         autosize=True,
         margin=dict(l=20, r=20, t=30, b=20),
@@ -147,7 +147,7 @@ def render_dashboard():
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # --- HTML/JS KISMI (HEM YATAY HEM DİKEY SCROLL) ---
+        # --- HTML/JS KISMI ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -155,39 +155,43 @@ def render_dashboard():
             <style>
                 body {{ margin: 0; background-color: #0e1117; font-family: sans-serif; }}
                 
-                /* KAPSAYICI: Artık hem X hem Y scroll'a izin veriyor */
                 #wrapper {{
                     width: 100%;
-                    height: 550px; /* Pencere yüksekliği sabit */
+                    height: 550px; 
                     position: relative;
                     border: 1px solid #333;
                     border-radius: 5px;
-                    overflow: auto; /* Hem dikey hem yatay bar çıksın */
-                    
-                    /* Titreme önleyici */
+                    overflow: auto; /* Scroll bar otomatik */
                     opacity: 0;
                     transition: opacity 0.4s ease-in-out; 
                 }}
 
-                /* İÇERİK: Genişlik VE Yükseklik JS ile değişecek */
+                /* SCROLL BAR TASARIMI (Görünür Olsun Diye) */
+                ::-webkit-scrollbar {{ width: 12px; height: 12px; }}
+                ::-webkit-scrollbar-track {{ background: #1e1e1e; }}
+                ::-webkit-scrollbar-thumb {{ background: #555; border-radius: 6px; border: 2px solid #1e1e1e; }}
+                ::-webkit-scrollbar-thumb:hover {{ background: #29b5e8; }}
+                ::-webkit-scrollbar-corner {{ background: #1e1e1e; }}
+
                 #content-box {{
                     width: {calc_width}px;
-                    height: 540px; /* Varsayılan yükseklik */
+                    height: 540px;
                 }}
 
-                /* KONTROL BUTONLARI GRUBU */
                 .controls-container {{
                     position: fixed; top: 20px; right: 30px; z-index: 9999;
                     display: flex; gap: 10px;
-                    background: rgba(14, 17, 23, 0.8);
+                    background: rgba(14, 17, 23, 0.9);
                     padding: 5px; border-radius: 8px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+                    border: 1px solid #333;
                 }}
                 
                 .control-group {{ display: flex; gap: 2px; align-items: center; }}
-                .label {{ color: #aaa; font-size: 12px; margin-right: 5px; }}
+                .label {{ color: #ccc; font-size: 14px; margin-right: 5px; font-weight: bold; }}
 
                 .btn {{
-                    background: rgba(41, 181, 232, 0.2); color: #29b5e8; border: 1px solid #29b5e8;
+                    background: rgba(41, 181, 232, 0.1); color: #29b5e8; border: 1px solid #29b5e8;
                     border-radius: 4px; width: 30px; height: 30px; font-size: 16px; cursor: pointer;
                     display: flex; align-items: center; justify-content: center; user-select: none;
                 }}
@@ -219,44 +223,41 @@ def render_dashboard():
                 var wrapper = document.getElementById("wrapper");
                 var contentBox = document.getElementById("content-box");
                 
-                // --- HAFIZA ANAHTARLARI ---
-                var scrollXKey = "scrollX_Tunagenc_Final";
-                var scrollYKey = "scrollY_Tunagenc_Final";
-                var widthKey = "chartWidth_Tunagenc_Final"; 
-                var heightKey = "chartHeight_Tunagenc_Final"; // Yeni: Yükseklik Hafızası
+                var scrollXKey = "scrollX_Final_v2";
+                var scrollYKey = "scrollY_Final_v2";
+                var widthKey = "chartWidth_Final_v2"; 
+                var heightKey = "chartHeight_Final_v2"; 
 
-                // 1. GENİŞLİK VE YÜKSEKLİK YÜKLE
+                // 1. BOYUTLARI YÜKLE
                 var savedWidth = sessionStorage.getItem(widthKey);
                 if (savedWidth) {{ contentBox.style.width = savedWidth + "px"; }}
                 
                 var savedHeight = sessionStorage.getItem(heightKey);
                 if (savedHeight) {{ contentBox.style.height = savedHeight + "px"; }}
 
-                // Plotly'yi yeni boyutlara göre çiz
                 var plotDiv = document.getElementById('amfi_chart');
                 if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
 
-                // 2. SCROLL POZİSYONLARINI YÜKLE (X ve Y)
+                // 2. SCROLL POZİSYONUNU YÜKLE
                 var savedX = sessionStorage.getItem(scrollXKey);
                 var savedY = sessionStorage.getItem(scrollYKey);
                 
                 if (savedX !== null) {{ wrapper.scrollLeft = parseInt(savedX); }} 
-                else {{ wrapper.scrollLeft = wrapper.scrollWidth; }} // İlk açılışta en sağa
+                else {{ wrapper.scrollLeft = wrapper.scrollWidth; }}
                 
                 if (savedY !== null) {{ wrapper.scrollTop = parseInt(savedY); }}
 
-                // 3. SMOOTH ANİMASYON
+                // 3. GÖRÜNÜR YAP
                 requestAnimationFrame(function() {{
                     wrapper.style.opacity = "1";
                 }});
 
-                // --- EVENTS (Kaydetme) ---
+                // EVENTS
                 wrapper.addEventListener("scroll", function() {{
                     sessionStorage.setItem(scrollXKey, wrapper.scrollLeft);
                     sessionStorage.setItem(scrollYKey, wrapper.scrollTop);
                 }});
 
-                // --- GENİŞLİK FONKSİYONU ---
                 function resizeWidth(multiplier) {{
                     var current = contentBox.offsetWidth;
                     var newVal = Math.max(600, current * multiplier);
@@ -265,10 +266,8 @@ def render_dashboard():
                     if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
                 }}
 
-                // --- YÜKSEKLİK FONKSİYONU (YENİ) ---
                 function resizeHeight(multiplier) {{
                     var current = contentBox.offsetHeight;
-                    // Min yükseklik 540px, Max sınır yok
                     var newVal = Math.max(540, current * multiplier);
                     contentBox.style.height = newVal + "px";
                     sessionStorage.setItem(heightKey, newVal);
