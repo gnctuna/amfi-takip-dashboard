@@ -99,18 +99,18 @@ def create_figure(df):
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True}
     )
     
-    # Çizgiyi kalınlaştır (Kırılmaları gizlemek için)
+    # Çizgi kalınlığı 2.5 (Ne çok ince, ne çok kalın)
     fig.update_traces(line=dict(width=2.5), marker=dict(size=6))
     
+    # AYARLAR GERİ DÖNDÜ: autosize=True (Bu çok önemli)
     fig.update_layout(
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
         
-        # --- KRİTİK AYAR: AUTOSIZE KAPALI ---
-        # Boyutu tamamen biz belirleyeceğiz, Plotly sıkıştırma yapmayacak.
-        autosize=False,
-        height=None, # HTML/JS kontrol edecek
+        # Plotly'yi serbest bırakıyoruz, HTML kutusuna uyacak.
+        autosize=True, 
+        height=None, 
         width=None,
         
         margin=dict(l=20, r=20, t=30, b=20),
@@ -151,7 +151,7 @@ def render_dashboard():
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # --- HTML/JS: "PENCERE VE KAĞIT" MANTIĞI ---
+        # --- HTML/JS KISMI ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -159,46 +159,42 @@ def render_dashboard():
             <style>
                 body {{ margin: 0; background-color: #0e1117; font-family: sans-serif; }}
                 
-                /* DIŞ PENCERE (Wrapper): Boyutu sabittir (550px) */
                 #wrapper {{
                     width: 100%;
                     height: 550px; 
                     position: relative;
                     border: 1px solid #333;
                     border-radius: 5px;
-                    overflow: scroll; /* Her zaman scroll bar çıksın */
+                    overflow: auto; /* Scroll bar otomatik */
                     opacity: 0;
                     transition: opacity 0.3s ease-in;
                 }}
 
-                /* İÇERİK (Kağıt): Boyutu değişkendir, pencereden büyük olabilir */
+                /* Scrollbar Görselleştirme */
+                ::-webkit-scrollbar {{ width: 12px; height: 12px; }}
+                ::-webkit-scrollbar-track {{ background: #111; }}
+                ::-webkit-scrollbar-thumb {{ background: #444; border-radius: 6px; }}
+                ::-webkit-scrollbar-thumb:hover {{ background: #29b5e8; }}
+
                 #content-box {{
                     width: {calc_width}px;
-                    height: 800px; /* Varsayılan olarak pencereden uzun başlatıyoruz */
+                    height: 540px; /* Başlangıç yüksekliği */
                 }}
 
-                /* Kontrol Paneli */
                 .controls-container {{
                     position: fixed; top: 20px; right: 40px; z-index: 9999;
                     display: flex; gap: 10px;
                     background: rgba(14, 17, 23, 0.9);
-                    padding: 8px; border-radius: 8px; border: 1px solid #444;
+                    padding: 5px; border-radius: 8px; border: 1px solid #444;
                 }}
                 .control-group {{ display: flex; gap: 5px; align-items: center; }}
-                .label {{ color: #ddd; font-size: 14px; font-weight: bold; margin-right: 5px; }}
+                .label {{ color: #ccc; font-size: 14px; margin-right: 5px; font-weight: bold; }}
                 .btn {{
                     background: rgba(41, 181, 232, 0.15); color: #29b5e8; border: 1px solid #29b5e8;
-                    border-radius: 4px; width: 32px; height: 32px; font-size: 18px; cursor: pointer;
+                    border-radius: 4px; width: 30px; height: 30px; font-size: 16px; cursor: pointer;
                     display: flex; align-items: center; justify-content: center; user-select: none;
                 }}
                 .btn:hover {{ background: #29b5e8; color: white; }}
-                
-                /* Scrollbar Tasarımı */
-                ::-webkit-scrollbar {{ width: 14px; height: 14px; }}
-                ::-webkit-scrollbar-track {{ background: #0e1117; }}
-                ::-webkit-scrollbar-thumb {{ background: #444; border-radius: 7px; border: 2px solid #0e1117; }}
-                ::-webkit-scrollbar-thumb:hover {{ background: #29b5e8; }}
-                ::-webkit-scrollbar-corner {{ background: #0e1117; }}
             </style>
         </head>
         <body>
@@ -224,27 +220,23 @@ def render_dashboard():
                 var wrapper = document.getElementById("wrapper");
                 var contentBox = document.getElementById("content-box");
                 
-                var scrollXKey = "scrollX_Mega_v1";
-                var scrollYKey = "scrollY_Mega_v1";
-                var widthKey = "chartWidth_Mega_v1"; 
-                var heightKey = "chartHeight_Mega_v1"; 
+                var scrollXKey = "scrollX_Safe_v1";
+                var scrollYKey = "scrollY_Safe_v1";
+                var widthKey = "chartWidth_Safe_v1"; 
+                var heightKey = "chartHeight_Safe_v1"; 
 
-                // 1. BOYUTLARI YÜKLE (Yoksa Varsayılan Değerleri Ata)
+                // 1. BOYUTLARI YÜKLE
                 var savedWidth = sessionStorage.getItem(widthKey);
                 if (savedWidth) {{ contentBox.style.width = savedWidth + "px"; }}
                 
                 var savedHeight = sessionStorage.getItem(heightKey);
-                if (savedHeight) {{ 
-                    contentBox.style.height = savedHeight + "px"; 
-                }} else {{
-                    // İlk açılışta 800px olsun (Pencereden büyük -> Scrollbar çıkar)
-                    contentBox.style.height = "800px";
-                }}
+                if (savedHeight) {{ contentBox.style.height = savedHeight + "px"; }}
 
+                // Plotly'yi UYANDIR
                 var plotDiv = document.getElementById('amfi_chart');
                 if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
 
-                // 2. SCROLL KONUMLARINI YÜKLE
+                // 2. SCROLL YÜKLE
                 var savedX = sessionStorage.getItem(scrollXKey);
                 if (savedX !== null) {{ wrapper.scrollLeft = parseInt(savedX); }} 
                 else {{ wrapper.scrollLeft = wrapper.scrollWidth; }}
@@ -252,7 +244,7 @@ def render_dashboard():
                 var savedY = sessionStorage.getItem(scrollYKey);
                 if (savedY !== null) {{ wrapper.scrollTop = parseInt(savedY); }}
 
-                // 3. GÖRÜNÜR YAP (Smooth Fade-in)
+                // 3. SMOOTH GEÇİŞ
                 requestAnimationFrame(function() {{
                     wrapper.style.opacity = "1";
                 }});
@@ -268,15 +260,16 @@ def render_dashboard():
                     var newVal = Math.max(600, current * multiplier);
                     contentBox.style.width = newVal + "px";
                     sessionStorage.setItem(widthKey, newVal);
+                    // Plotly'ye yeniden boyutlanmasını söyle
                     if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
                 }}
 
                 function resizeHeight(multiplier) {{
                     var current = contentBox.offsetHeight;
-                    // Min yükseklik 550 (Pencere boyu)
-                    var newVal = Math.max(550, current * multiplier);
+                    var newVal = Math.max(540, current * multiplier);
                     contentBox.style.height = newVal + "px";
                     sessionStorage.setItem(heightKey, newVal);
+                    // Plotly'ye yeniden boyutlanmasını söyle
                     if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
                 }}
             </script>
