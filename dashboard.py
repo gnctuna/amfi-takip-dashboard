@@ -83,21 +83,20 @@ def start_mqtt():
 data_queue = get_message_queue()
 start_mqtt()
 
-# --- GRAFİK OLUŞTURUCU (SADELEŞTİRİLDİ) ---
+# --- GRAFİK OLUŞTURUCU ---
 def create_figure(df):
     if df.empty: return None, 500
     
     POINT_WIDTH_PX = 40 
     dynamic_width = max(800, len(df) * POINT_WIDTH_PX)
 
-    # Renk ayrımı kaldırıldı, hepsi tek renk (Mavi)
     fig = px.line(
         df, 
         x='Zaman', 
         y="Kişi", 
         markers=True,
-        color_discrete_sequence=['#29b5e8'], # Tek renk: Mavi
-        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True} # Mod bilgisini üzerine gelince görebilirsin
+        color_discrete_sequence=['#29b5e8'],
+        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True}
     )
     
     fig.update_layout(
@@ -145,7 +144,7 @@ def render_dashboard():
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # HTML/JS (Titreme önleyicili versiyon)
+        # --- HTML/JS KISMI (FLICKER FIX) ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -160,8 +159,10 @@ def render_dashboard():
                     border-radius: 5px;
                     overflow-x: auto;
                     overflow-y: hidden;
-                    opacity: 0;
-                    transition: opacity 0.3s ease-in;
+                    
+                    /* ÖNEMLİ DEĞİŞİKLİK: 'Transition' kaldırıldı */
+                    /* Sadece başta görünmez yapıyoruz */
+                    opacity: 0; 
                 }}
                 #content-box {{
                     width: {calc_width}px; 
@@ -194,6 +195,7 @@ def render_dashboard():
                 var contentBox = document.getElementById("content-box");
                 var storageKey = "scrollPos_Tunagenc_v1";
 
+                // 1. POZİSYONU AYARLA
                 var savedPos = sessionStorage.getItem(storageKey);
                 if (savedPos !== null) {{
                     wrapper.scrollLeft = parseInt(savedPos);
@@ -201,14 +203,17 @@ def render_dashboard():
                     wrapper.scrollLeft = wrapper.scrollWidth;
                 }}
 
-                requestAnimationFrame(function() {{
-                    wrapper.style.opacity = "1";
-                }});
+                // 2. HEMEN GÖRÜNÜR YAP (Animasyonsuz, beklemesiz)
+                // Konum ayarlandıktan hemen sonra görünür yapıyoruz.
+                // Göz kırpma efekti minimuma iniyor.
+                wrapper.style.opacity = "1";
 
+                // Scroll Dinleyicisi
                 wrapper.addEventListener("scroll", function() {{
                     sessionStorage.setItem(storageKey, wrapper.scrollLeft);
                 }});
 
+                // Zoom Fonksiyonu
                 function resizeChart(multiplier) {{
                     var currentWidth = contentBox.offsetWidth;
                     var newWidth = currentWidth * multiplier;
