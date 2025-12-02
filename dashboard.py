@@ -83,21 +83,21 @@ def start_mqtt():
 data_queue = get_message_queue()
 start_mqtt()
 
-# --- GRAFİK OLUŞTURUCU (SADELEŞTİRİLDİ) ---
+# --- GRAFİK OLUŞTURUCU ---
 def create_figure(df):
     if df.empty: return None, 500
     
+    # Otomatik büyüme için baz hesaplama (Kullanıcı zoom yapmadıysa bu geçerli olur)
     POINT_WIDTH_PX = 40 
     dynamic_width = max(800, len(df) * POINT_WIDTH_PX)
 
-    # Renk ayrımı kaldırıldı, hepsi tek renk (Mavi)
     fig = px.line(
         df, 
         x='Zaman', 
         y="Kişi", 
         markers=True,
-        color_discrete_sequence=['#29b5e8'], # Tek renk: Mavi
-        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True} # Mod bilgisini üzerine gelince görebilirsin
+        color_discrete_sequence=['#29b5e8'], # Tek renk Mavi
+        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True}
     )
     
     fig.update_layout(
@@ -145,7 +145,7 @@ def render_dashboard():
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # HTML/JS (Titreme önleyicili versiyon)
+        # --- JAVASCRIPT GÜNCELLEMESİ (ZOOM HAFIZASI EKLENDİ) ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -160,11 +160,10 @@ def render_dashboard():
                     border-radius: 5px;
                     overflow-x: auto;
                     overflow-y: hidden;
-                    opacity: 0;
-                    transition: opacity 0.3s ease-in;
+                    opacity: 0; /* Titreme için başlangıçta gizli */
                 }}
                 #content-box {{
-                    width: {calc_width}px; 
+                    width: {calc_width}px; /* Python'dan gelen varsayılan genişlik */
                     height: 540px;
                 }}
                 .zoom-controls {{
@@ -173,9 +172,10 @@ def render_dashboard():
                 .btn {{
                     background: rgba(41, 181, 232, 0.2); color: #29b5e8; border: 1px solid #29b5e8;
                     border-radius: 5px; width: 30px; height: 30px; font-size: 18px; cursor: pointer;
-                    display: flex; align-items: center; justify-content: center;
+                    display: flex; align-items: center; justify-content: center; user-select: none;
                 }}
                 .btn:hover {{ background: #29b5e8; color: white; }}
+                .btn:active {{ background: #1a7ca0; }}
             </style>
         </head>
         <body>
@@ -192,28 +192,51 @@ def render_dashboard():
             <script>
                 var wrapper = document.getElementById("wrapper");
                 var contentBox = document.getElementById("content-box");
-                var storageKey = "scrollPos_Tunagenc_v1";
+                
+                var scrollKey = "scrollPos_Tunagenc_v2";
+                var widthKey = "chartWidth_Tunagenc_v2"; // Genişlik için yeni hafıza
 
-                var savedPos = sessionStorage.getItem(storageKey);
+                // --- 1. ZOOM (GENİŞLİK) AYARINI YÜKLE ---
+                var savedWidth = sessionStorage.getItem(widthKey);
+                if (savedWidth) {{
+                    // Eğer kullanıcı daha önce zoom yaptıysa, o boyutu kullan
+                    contentBox.style.width = savedWidth + "px";
+                    
+                    // Plotly'ye grafiği yeni boyuta uydurmasını söyle
+                    var plotDiv = document.getElementById('amfi_chart');
+                    if (plotDiv && window.Plotly) {{ 
+                        Plotly.Plots.resize(plotDiv); 
+                    }}
+                }}
+
+                // --- 2. SCROLL POZİSYONUNU YÜKLE ---
+                var savedPos = sessionStorage.getItem(scrollKey);
                 if (savedPos !== null) {{
                     wrapper.scrollLeft = parseInt(savedPos);
                 }} else {{
                     wrapper.scrollLeft = wrapper.scrollWidth;
                 }}
 
-                requestAnimationFrame(function() {{
-                    wrapper.style.opacity = "1";
-                }});
+                // --- 3. GÖRÜNÜR YAP (Titremesiz) ---
+                wrapper.style.opacity = "1";
 
+                // --- EVENTS ---
                 wrapper.addEventListener("scroll", function() {{
-                    sessionStorage.setItem(storageKey, wrapper.scrollLeft);
+                    sessionStorage.setItem(scrollKey, wrapper.scrollLeft);
                 }});
 
                 function resizeChart(multiplier) {{
                     var currentWidth = contentBox.offsetWidth;
                     var newWidth = currentWidth * multiplier;
+                    
+                    // Minimum sınır (Çok küçülmesin)
                     if (newWidth < 600) newWidth = 600;
+                    
                     contentBox.style.width = newWidth + "px";
+                    
+                    // Yeni genişliği hafızaya kaydet
+                    sessionStorage.setItem(widthKey, newWidth);
+                    
                     var plotDiv = document.getElementById('amfi_chart');
                     if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
                 }}
