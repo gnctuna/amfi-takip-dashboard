@@ -83,7 +83,7 @@ def start_mqtt():
 data_queue = get_message_queue()
 start_mqtt()
 
-# --- GRAFİK OLUŞTURUCU (GÜNCELLENDİ: BASAMAKLI YAPI) ---
+# --- GRAFİK OLUŞTURUCU ---
 def create_figure(df):
     if df.empty: return None, 500
     
@@ -99,16 +99,14 @@ def create_figure(df):
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True}
     )
     
-    # --- KRİTİK DEĞİŞİKLİK: BASAMAKLI ÇİZİM ---
-    # 'hv' (Horizontal-Vertical) modu: Önce yatay git, değişim anında dikey in/çık.
-    # Bu sayede zoom yapınca çizgi bozulmaz, dijital sinyal gibi net durur.
-    fig.update_traces(line_shape='hv', marker=dict(size=8)) 
+    # Basamaklı çizim (Step Line) - Keskin hatlar için
+    fig.update_traces(line_shape='hv') 
     
     fig.update_layout(
         xaxis_title="", 
         yaxis_title="Kişi Sayısı",
         template="plotly_dark",
-        height=None, 
+        height=None, # Yükseklik artık dışarıdaki HTML tarafından kontrol edilecek
         width=None,
         autosize=True,
         margin=dict(l=20, r=20, t=30, b=20),
@@ -149,34 +147,48 @@ def render_dashboard():
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # HTML/JS (Aynı Yapı Korundu)
+        # --- HTML/JS KISMI (HEM YATAY HEM DİKEY SCROLL) ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <style>
                 body {{ margin: 0; background-color: #0e1117; font-family: sans-serif; }}
+                
+                /* KAPSAYICI: Artık hem X hem Y scroll'a izin veriyor */
                 #wrapper {{
                     width: 100%;
-                    height: 550px;
+                    height: 550px; /* Pencere yüksekliği sabit */
                     position: relative;
                     border: 1px solid #333;
                     border-radius: 5px;
-                    overflow-x: auto;
-                    overflow-y: hidden;
+                    overflow: auto; /* Hem dikey hem yatay bar çıksın */
+                    
+                    /* Titreme önleyici */
                     opacity: 0;
                     transition: opacity 0.4s ease-in-out; 
                 }}
+
+                /* İÇERİK: Genişlik VE Yükseklik JS ile değişecek */
                 #content-box {{
                     width: {calc_width}px;
-                    height: 540px;
+                    height: 540px; /* Varsayılan yükseklik */
                 }}
-                .zoom-controls {{
-                    position: fixed; top: 20px; right: 30px; z-index: 9999; display: flex; gap: 5px;
+
+                /* KONTROL BUTONLARI GRUBU */
+                .controls-container {{
+                    position: fixed; top: 20px; right: 30px; z-index: 9999;
+                    display: flex; gap: 10px;
+                    background: rgba(14, 17, 23, 0.8);
+                    padding: 5px; border-radius: 8px;
                 }}
+                
+                .control-group {{ display: flex; gap: 2px; align-items: center; }}
+                .label {{ color: #aaa; font-size: 12px; margin-right: 5px; }}
+
                 .btn {{
                     background: rgba(41, 181, 232, 0.2); color: #29b5e8; border: 1px solid #29b5e8;
-                    border-radius: 5px; width: 30px; height: 30px; font-size: 18px; cursor: pointer;
+                    border-radius: 4px; width: 30px; height: 30px; font-size: 16px; cursor: pointer;
                     display: flex; align-items: center; justify-content: center; user-select: none;
                 }}
                 .btn:hover {{ background: #29b5e8; color: white; }}
@@ -185,10 +197,19 @@ def render_dashboard():
         </head>
         <body>
             <div id="wrapper">
-                <div class="zoom-controls">
-                    <div class="btn" onclick="resizeChart(0.8)">-</div>
-                    <div class="btn" onclick="resizeChart(1.2)">+</div>
+                <div class="controls-container">
+                    <div class="control-group">
+                        <span class="label">↔</span>
+                        <div class="btn" onclick="resizeWidth(0.8)">-</div>
+                        <div class="btn" onclick="resizeWidth(1.2)">+</div>
+                    </div>
+                    <div class="control-group" style="border-left: 1px solid #555; padding-left: 10px;">
+                        <span class="label">↕</span>
+                        <div class="btn" onclick="resizeHeight(0.8)">-</div>
+                        <div class="btn" onclick="resizeHeight(1.2)">+</div>
+                    </div>
                 </div>
+
                 <div id="content-box">
                     {fig_html}
                 </div>
@@ -198,42 +219,59 @@ def render_dashboard():
                 var wrapper = document.getElementById("wrapper");
                 var contentBox = document.getElementById("content-box");
                 
-                var scrollKey = "scrollPos_Tunagenc_v2";
-                var widthKey = "chartWidth_Tunagenc_v2"; 
+                // --- HAFIZA ANAHTARLARI ---
+                var scrollXKey = "scrollX_Tunagenc_Final";
+                var scrollYKey = "scrollY_Tunagenc_Final";
+                var widthKey = "chartWidth_Tunagenc_Final"; 
+                var heightKey = "chartHeight_Tunagenc_Final"; // Yeni: Yükseklik Hafızası
 
-                // Zoom Yükle
+                // 1. GENİŞLİK VE YÜKSEKLİK YÜKLE
                 var savedWidth = sessionStorage.getItem(widthKey);
-                if (savedWidth) {{
-                    contentBox.style.width = savedWidth + "px";
-                    var plotDiv = document.getElementById('amfi_chart');
-                    if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
-                }}
+                if (savedWidth) {{ contentBox.style.width = savedWidth + "px"; }}
+                
+                var savedHeight = sessionStorage.getItem(heightKey);
+                if (savedHeight) {{ contentBox.style.height = savedHeight + "px"; }}
 
-                // Scroll Yükle
-                var savedPos = sessionStorage.getItem(scrollKey);
-                if (savedPos !== null) {{
-                    wrapper.scrollLeft = parseInt(savedPos);
-                }} else {{
-                    wrapper.scrollLeft = wrapper.scrollWidth;
-                }}
+                // Plotly'yi yeni boyutlara göre çiz
+                var plotDiv = document.getElementById('amfi_chart');
+                if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
 
-                // Görünür Yap
+                // 2. SCROLL POZİSYONLARINI YÜKLE (X ve Y)
+                var savedX = sessionStorage.getItem(scrollXKey);
+                var savedY = sessionStorage.getItem(scrollYKey);
+                
+                if (savedX !== null) {{ wrapper.scrollLeft = parseInt(savedX); }} 
+                else {{ wrapper.scrollLeft = wrapper.scrollWidth; }} // İlk açılışta en sağa
+                
+                if (savedY !== null) {{ wrapper.scrollTop = parseInt(savedY); }}
+
+                // 3. SMOOTH ANİMASYON
                 requestAnimationFrame(function() {{
                     wrapper.style.opacity = "1";
                 }});
 
-                // Events
+                // --- EVENTS (Kaydetme) ---
                 wrapper.addEventListener("scroll", function() {{
-                    sessionStorage.setItem(scrollKey, wrapper.scrollLeft);
+                    sessionStorage.setItem(scrollXKey, wrapper.scrollLeft);
+                    sessionStorage.setItem(scrollYKey, wrapper.scrollTop);
                 }});
 
-                function resizeChart(multiplier) {{
-                    var currentWidth = contentBox.offsetWidth;
-                    var newWidth = currentWidth * multiplier;
-                    if (newWidth < 600) newWidth = 600;
-                    contentBox.style.width = newWidth + "px";
-                    sessionStorage.setItem(widthKey, newWidth);
-                    var plotDiv = document.getElementById('amfi_chart');
+                // --- GENİŞLİK FONKSİYONU ---
+                function resizeWidth(multiplier) {{
+                    var current = contentBox.offsetWidth;
+                    var newVal = Math.max(600, current * multiplier);
+                    contentBox.style.width = newVal + "px";
+                    sessionStorage.setItem(widthKey, newVal);
+                    if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
+                }}
+
+                // --- YÜKSEKLİK FONKSİYONU (YENİ) ---
+                function resizeHeight(multiplier) {{
+                    var current = contentBox.offsetHeight;
+                    // Min yükseklik 540px, Max sınır yok
+                    var newVal = Math.max(540, current * multiplier);
+                    contentBox.style.height = newVal + "px";
+                    sessionStorage.setItem(heightKey, newVal);
                     if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
                 }}
             </script>
