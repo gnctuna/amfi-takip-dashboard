@@ -242,7 +242,7 @@ def render_dashboard():
                 // EVENTS
                 wrapper.addEventListener("scroll", function() {{
                     sessionStorage.setItem(scrollXKey, wrapper.scrollLeft);
-                });
+                }});
 
                 function resizeWidth(multiplier) {{
                     var current = contentBox.offsetWidth;
