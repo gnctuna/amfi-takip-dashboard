@@ -146,7 +146,7 @@ def render_dashboard():
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # --- HTML/JS KISMI (GÜNCELLENDİ) ---
+        # --- TİTREMEYİ ENGELLEYEN HTML/JS KODU ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -161,6 +161,10 @@ def render_dashboard():
                     border-radius: 5px;
                     overflow-x: auto;
                     overflow-y: hidden;
+                    
+                    /* TİTREME ÖNLEYİCİ: Başlangıçta görünmez yap */
+                    opacity: 0;
+                    transition: opacity 0.3s ease-in;
                 }}
                 #content-box {{
                     width: {calc_width}px; 
@@ -190,29 +194,35 @@ def render_dashboard():
             </div>
 
             <script>
+                // DOM elemanlarını al
                 var wrapper = document.getElementById("wrapper");
                 var contentBox = document.getElementById("content-box");
-                var storageKey = "scrollPos_Tunagenc_v1"; // Hafıza anahtarı
+                var storageKey = "scrollPos_Tunagenc_v1";
 
-                // 1. SCROLL POZİSYONUNU GERİ YÜKLE
-                setTimeout(function() {{
-                    var savedPos = sessionStorage.getItem(storageKey);
-                    
-                    if (savedPos !== null) {{
-                        // Eğer hafızada konum varsa oraya git
-                        wrapper.scrollLeft = parseInt(savedPos);
-                    }} else {{
-                        // Eğer hiç kayıt yoksa (ilk açılışsa) en sağa git
-                        wrapper.scrollLeft = wrapper.scrollWidth;
-                    }}
-                }}, 300);
+                // --- 1. KAYDIRMA KONUMUNU AYARLA (Hemen çalışır) ---
+                var savedPos = sessionStorage.getItem(storageKey);
+                
+                // Genişlikler zaten CSS ile belli olduğu için, 
+                // tarayıcı pikselleri henüz çizmese bile scroll işlemi çalışır.
+                if (savedPos !== null) {{
+                    wrapper.scrollLeft = parseInt(savedPos);
+                }} else {{
+                    wrapper.scrollLeft = wrapper.scrollWidth;
+                }}
 
-                // 2. HER KAYDIRMAYI HAFIZAYA KAYDET
+                // --- 2. GÖRÜNÜR YAP (Konum ayarlandıktan sonra) ---
+                // Küçük bir nefes payı bırakıp görünür yapıyoruz.
+                // Bu sayede kullanıcı sola gidip gelmeyi görmüyor.
+                requestAnimationFrame(function() {{
+                    wrapper.style.opacity = "1";
+                }});
+
+                // --- 3. SCROLL DİNLEYİCİSİ ---
                 wrapper.addEventListener("scroll", function() {{
                     sessionStorage.setItem(storageKey, wrapper.scrollLeft);
                 }});
 
-                // --- ZOOM FONKSİYONU ---
+                // --- 4. ZOOM FONKSİYONU ---
                 function resizeChart(multiplier) {{
                     var currentWidth = contentBox.offsetWidth;
                     var newWidth = currentWidth * multiplier;
