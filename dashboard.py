@@ -83,7 +83,7 @@ def start_mqtt():
 data_queue = get_message_queue()
 start_mqtt()
 
-# --- GRAFİK OLUŞTURUCU ---
+# --- GRAFİK OLUŞTURUCU (GÜNCELLENDİ: BASAMAKLI YAPI) ---
 def create_figure(df):
     if df.empty: return None, 500
     
@@ -95,9 +95,14 @@ def create_figure(df):
         x='Zaman', 
         y="Kişi", 
         markers=True,
-        color_discrete_sequence=['#29b5e8'], # Tek renk Mavi
+        color_discrete_sequence=['#29b5e8'],
         hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True}
     )
+    
+    # --- KRİTİK DEĞİŞİKLİK: BASAMAKLI ÇİZİM ---
+    # 'hv' (Horizontal-Vertical) modu: Önce yatay git, değişim anında dikey in/çık.
+    # Bu sayede zoom yapınca çizgi bozulmaz, dijital sinyal gibi net durur.
+    fig.update_traces(line_shape='hv', marker=dict(size=8)) 
     
     fig.update_layout(
         xaxis_title="", 
@@ -144,7 +149,7 @@ def render_dashboard():
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # --- HTML/JS KISMI (SMOOTH TRANSITION + ZOOM HAFIZASI) ---
+        # HTML/JS (Aynı Yapı Korundu)
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -159,8 +164,6 @@ def render_dashboard():
                     border-radius: 5px;
                     overflow-x: auto;
                     overflow-y: hidden;
-                    
-                    /* SMOOTH GEÇİŞ GERİ GELDİ */
                     opacity: 0;
                     transition: opacity 0.4s ease-in-out; 
                 }}
@@ -198,17 +201,15 @@ def render_dashboard():
                 var scrollKey = "scrollPos_Tunagenc_v2";
                 var widthKey = "chartWidth_Tunagenc_v2"; 
 
-                // --- 1. ZOOM (GENİŞLİK) YÜKLE ---
+                // Zoom Yükle
                 var savedWidth = sessionStorage.getItem(widthKey);
                 if (savedWidth) {{
                     contentBox.style.width = savedWidth + "px";
                     var plotDiv = document.getElementById('amfi_chart');
-                    if (plotDiv && window.Plotly) {{ 
-                        Plotly.Plots.resize(plotDiv); 
-                    }}
+                    if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
                 }}
 
-                // --- 2. SCROLL POZİSYONU YÜKLE ---
+                // Scroll Yükle
                 var savedPos = sessionStorage.getItem(scrollKey);
                 if (savedPos !== null) {{
                     wrapper.scrollLeft = parseInt(savedPos);
@@ -216,14 +217,12 @@ def render_dashboard():
                     wrapper.scrollLeft = wrapper.scrollWidth;
                 }}
 
-                // --- 3. SMOOTH ANİMASYON ---
-                // Browser'a 'bir sonraki karede' opaklığı artırmasını söylüyoruz.
-                // Bu sayede CSS transition devreye giriyor.
+                // Görünür Yap
                 requestAnimationFrame(function() {{
                     wrapper.style.opacity = "1";
                 }});
 
-                // --- EVENTS ---
+                // Events
                 wrapper.addEventListener("scroll", function() {{
                     sessionStorage.setItem(scrollKey, wrapper.scrollLeft);
                 }});
