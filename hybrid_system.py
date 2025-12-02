@@ -9,6 +9,7 @@ from datetime import datetime
 # --- GENEL AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
+MIN_CONFIDENCE = 0.65  # <-- YENİ EKLENDİ: %65 altını görmezden gel
 
 def main():
     # 1. MODU SEÇ (Konsoldan)
@@ -18,6 +19,7 @@ def main():
         SCENARIO = "SINIF" # Varsayılan
 
     print(f"🚀 SİSTEM BAŞLATILIYOR: {SCENARIO} MODU")
+    print(f"🛡️ Güven Eşiği (Threshold): %{int(MIN_CONFIDENCE*100)}")
 
     # --- SENARYOYA GÖRE MODEL VE STRATEJİ SEÇİMİ ---
     if SCENARIO == "AMFI":
@@ -25,7 +27,7 @@ def main():
         model_name = "yolov8x.pt" 
         print(f"📸 Mod: SNAPSHOT (Her 5 dakikada bir analiz)")
         print(f"🧠 Model: {model_name} (Extra Large - Maksimum Detay)")
-        interval = 300 # 300 saniye = 5 Dakika (Test için bunu 10 yapabilirsin)
+        interval = 300 # 300 saniye = 5 Dakika
         
     elif SCENARIO == "SINIF":
         # SINIF: En hızlı model, sürekli akış (Real-time Tracking)
@@ -60,22 +62,21 @@ def main():
             cap.set(3, 1280) # Yüksek çözünürlük
             cap.set(4, 720)
             
-            # Işık ayarı için ısınma turları (5 kare boşa çek)
+            # Işık ayarı için ısınma turları
             for _ in range(5):
                 cap.read()
                 
             success, frame = cap.read()
-            
-            # Fotoğrafı alır almaz kamerayı kapat (Gizlilik + Enerji Tasarrufu)
-            cap.release()
+            cap.release() # Hemen kapat
             
             if success:
-                print("🧠 Görüntü analiz ediliyor (Extra Large Model)...")
-                # Tracking değil Predict kullanıyoruz (Tek kare olduğu için)
-                results = model.predict(frame, classes=0, conf=0.25, verbose=False)
+                print("🧠 Görüntü analiz ediliyor...")
+                
+                # GÜNCELLEME BURADA YAPILDI: conf=MIN_CONFIDENCE (0.65)
+                results = model.predict(frame, classes=0, conf=MIN_CONFIDENCE, verbose=False)
                 
                 count = len(results[0].boxes)
-                print(f"✅ Sayım Sonucu: {count} Kişi")
+                print(f"✅ Sayım Sonucu: {count} Kişi (Güven > %65)")
                 
                 # Veriyi Gönder
                 payload = {
@@ -89,7 +90,7 @@ def main():
             else:
                 print("❌ Kamera hatası!")
 
-            # 5 Dakika Uyu
+            # Bekleme
             print(f"💤 Sistem {interval} saniye uykuya geçiyor...")
             time.sleep(interval)
 
@@ -97,9 +98,8 @@ def main():
     # SENARYO 2: SINIF (CANLI / TRACKING)
     # ==========================================
     elif SCENARIO == "SINIF":
-        # Kamerayı bir kere aç ve hep açık tut
         cap = cv2.VideoCapture(0)
-        cap.set(3, 640) # Hız için daha düşük çözünürlük yeterli
+        cap.set(3, 640)
         cap.set(4, 480)
         
         print("🎥 Canlı yayın başladı. Çıkmak için 'q'ya basın.")
@@ -108,22 +108,19 @@ def main():
             success, frame = cap.read()
             if not success: break
             
-            # CANLI TAKİP (Tracking)
-            # persist=True -> Kişi ID'lerini hatırla
-            results = model.track(frame, persist=True, classes=0, verbose=False)
+            # GÜNCELLEME BURADA YAPILDI: conf=MIN_CONFIDENCE (0.65)
+            results = model.track(frame, persist=True, classes=0, conf=MIN_CONFIDENCE, verbose=False)
             
-            # ID sayısını al (Kutu sayısı yerine ID sayısı daha stabildir)
+            # ID sayısını al
             current_count = 0
             if results[0].boxes.id is not None:
                 current_count = len(results[0].boxes.id)
             
-            # Görselleştirme (Ekrana çiz)
+            # Görselleştirme
             annotated_frame = results[0].plot()
             cv2.putText(annotated_frame, f"Canli: {current_count}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
             cv2.imshow("SINIF MODU - Canli Takip", annotated_frame)
             
-            # Veriyi sürekli göndermek yerine sadece değişim olduğunda 
-            # veya belli aralıklarla göndermek daha iyidir ama şimdilik gönderiyoruz:
             payload = {
                 "mode": "SINIF_LIVE",
                 "occupancy": current_count,
@@ -132,7 +129,6 @@ def main():
             }
             client.publish(MQTT_TOPIC, json.dumps(payload))
             
-            # Çıkış kontrolü
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         
