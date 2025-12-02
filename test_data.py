@@ -6,10 +6,10 @@ import random
 # --- AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
+GENDERME_HIZI = 3  # <-- ÖNEMLİ: Veri gönderme sıklığı (Saniye)
 
 def main():
-    print("🧪 GELİŞMİŞ Test Simülatörü Başlatıldı...")
-    print("Senaryolar arasında rastgele geçiş yapılacak (Ders / Teneffüs / Amfi)...")
+    print(f"🧪 SİMÜLATÖR BAŞLATILDI (Hız: Her {GENDERME_HIZI} saniyede bir)")
     
     client = mqtt.Client()
     try:
@@ -19,60 +19,50 @@ def main():
         print("❌ HATA: İnternet bağlantısı yok!")
         return
 
-    # Başlangıç değeri
     current_count = 10
-    current_mode = "SINIF_LIVE" # Başlangıç modu
+    current_mode = "SINIF_LIVE" 
     
     while True:
-        # --- 1. SENARYO DEĞİŞİMİ (%10 Şans) ---
-        # Her döngüde %10 ihtimalle radikal bir değişiklik olsun
-        if random.random() < 0.10:
+        # --- 1. SENARYO DEĞİŞİMİ (%20 Şans) ---
+        if random.random() < 0.20:
             scenario_roll = random.random()
             
             if scenario_roll < 0.33:
-                # DURUM 1: TENEFFÜS / BOŞ ODA (Az Kişi)
                 current_count = random.randint(0, 15)
                 current_mode = "SINIF_LIVE"
-                print("\n📉 SENARYO: Teneffüs (Oda Boşaldı)")
+                print("\n📉 SENARYO: Teneffüs")
                 
             elif scenario_roll < 0.66:
-                # DURUM 2: NORMAL SINIF DERSİ (Orta Kişi)
                 current_count = random.randint(25, 45)
                 current_mode = "SINIF_LIVE"
-                print("\n🏫 SENARYO: Sınıf Dersi (Orta Kalabalık)")
+                print("\n🏫 SENARYO: Sınıf Dersi")
                 
             else:
-                # DURUM 3: AMFİ KONFERANSI (Çok Kişi)
                 current_count = random.randint(120, 200)
                 current_mode = "AMFI_SNAPSHOT"
-                print("\n🚀 SENARYO: Amfi Konferansı (Aşırı Kalabalık)")
+                print("\n🚀 SENARYO: Amfi Konferansı")
 
         # --- 2. UFAK DALGALANMALAR ---
-        # Sayı sabit kalmasın, yaşayan bir veri gibi +-3 oynasın
         change = random.randint(-3, 3)
         current_count += change
-        
-        # Eksiye düşmeyi engelle
         if current_count < 0: current_count = 0
         
         # --- 3. VERİ PAKETLEME ---
-        # Kalabalık sınırı duruma göre değişsin
         limit = 50 if current_mode == "AMFI_SNAPSHOT" else 20
         status = "Crowded" if current_count > limit else "Normal"
         
         payload = {
             "occupancy": current_count,
             "status": status,
-            "mode": current_mode, # Dashboard rengi buna göre değişecek
+            "mode": current_mode,
             "timestamp": time.time()
         }
         
         client.publish(MQTT_TOPIC, json.dumps(payload))
+        print(f"📤 Giden: {current_count} Kişi | {status} | Bekleniyor...")
         
-        print(f"📤 Giden: {current_count} Kişi | Mod: {current_mode}")
-        
-        # Dashboard'un hızını test etmek için 1 saniye bekle
-        time.sleep(1)
+        # YENİ AYAR: Burada 3 saniye bekliyoruz
+        time.sleep(GENDERME_HIZI)
 
 if __name__ == "__main__":
     main()
