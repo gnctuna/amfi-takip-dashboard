@@ -95,8 +95,9 @@ def create_figure(df):
         x='Zaman', 
         y="Kişi", 
         markers=True,
-        color_discrete_sequence=['#29b5e8'],
-        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True}
+        color='Mod',
+        color_discrete_map={'SINIF_LIVE': '#29b5e8', 'AMFI_SNAPSHOT': '#e8295c'},
+        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True}
     )
     
     fig.update_layout(
@@ -112,6 +113,7 @@ def create_figure(df):
         plot_bgcolor='#0e1117',
         xaxis=dict(showgrid=True, gridcolor='#333', type='category'),
         yaxis=dict(showgrid=True, gridcolor='#333'),
+        legend=dict(orientation="h", y=1.1)
     )
 
     fig.update_xaxes(showticklabels=False, fixedrange=True)
@@ -139,12 +141,12 @@ def render_dashboard():
             status_icon = "🔴 Kalabalık" if last_row['Durum'] == 'Crowded' else "🟢 Normal"
             c2.metric("Durum", status_icon)
             c3.metric("Son Veri", last_row['Zaman'].split(" ")[1])
-            c4.metric("Aktif Mod", last_row['Mod'])
+            c4.metric("Mod", last_row['Mod'])
 
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # --- HTML/JS KISMI (FLICKER FIX) ---
+        # --- TİTREMEYİ ENGELLEYEN HTML/JS KODU ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -160,16 +162,17 @@ def render_dashboard():
                     overflow-x: auto;
                     overflow-y: hidden;
                     
-                    /* ÖNEMLİ DEĞİŞİKLİK: 'Transition' kaldırıldı */
-                    /* Sadece başta görünmez yapıyoruz */
-                    opacity: 0; 
+                    /* TİTREME ÖNLEYİCİ: Başlangıçta görünmez yap */
+                    opacity: 0;
+                    transition: opacity 0.3s ease-in;
                 }}
                 #content-box {{
                     width: {calc_width}px; 
                     height: 540px;
                 }}
                 .zoom-controls {{
-                    position: fixed; top: 20px; right: 30px; z-index: 9999; display: flex; gap: 5px;
+                    position: fixed; 
+                    top: 20px; right: 30px; z-index: 9999; display: flex; gap: 5px;
                 }}
                 .btn {{
                     background: rgba(41, 181, 232, 0.2); color: #29b5e8; border: 1px solid #29b5e8;
@@ -191,29 +194,35 @@ def render_dashboard():
             </div>
 
             <script>
+                // DOM elemanlarını al
                 var wrapper = document.getElementById("wrapper");
                 var contentBox = document.getElementById("content-box");
                 var storageKey = "scrollPos_Tunagenc_v1";
 
-                // 1. POZİSYONU AYARLA
+                // --- 1. KAYDIRMA KONUMUNU AYARLA (Hemen çalışır) ---
                 var savedPos = sessionStorage.getItem(storageKey);
+                
+                // Genişlikler zaten CSS ile belli olduğu için, 
+                // tarayıcı pikselleri henüz çizmese bile scroll işlemi çalışır.
                 if (savedPos !== null) {{
                     wrapper.scrollLeft = parseInt(savedPos);
                 }} else {{
                     wrapper.scrollLeft = wrapper.scrollWidth;
                 }}
 
-                // 2. HEMEN GÖRÜNÜR YAP (Animasyonsuz, beklemesiz)
-                // Konum ayarlandıktan hemen sonra görünür yapıyoruz.
-                // Göz kırpma efekti minimuma iniyor.
-                wrapper.style.opacity = "1";
+                // --- 2. GÖRÜNÜR YAP (Konum ayarlandıktan sonra) ---
+                // Küçük bir nefes payı bırakıp görünür yapıyoruz.
+                // Bu sayede kullanıcı sola gidip gelmeyi görmüyor.
+                requestAnimationFrame(function() {{
+                    wrapper.style.opacity = "1";
+                }});
 
-                // Scroll Dinleyicisi
+                // --- 3. SCROLL DİNLEYİCİSİ ---
                 wrapper.addEventListener("scroll", function() {{
                     sessionStorage.setItem(storageKey, wrapper.scrollLeft);
                 }});
 
-                // Zoom Fonksiyonu
+                // --- 4. ZOOM FONKSİYONU ---
                 function resizeChart(multiplier) {{
                     var currentWidth = contentBox.offsetWidth;
                     var newWidth = currentWidth * multiplier;
