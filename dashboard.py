@@ -87,7 +87,6 @@ start_mqtt()
 def create_figure(df):
     if df.empty: return None, 500
     
-    # Otomatik büyüme için baz hesaplama (Kullanıcı zoom yapmadıysa bu geçerli olur)
     POINT_WIDTH_PX = 40 
     dynamic_width = max(800, len(df) * POINT_WIDTH_PX)
 
@@ -145,7 +144,7 @@ def render_dashboard():
         fig, calc_width = create_figure(df)
         fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
         
-        # --- JAVASCRIPT GÜNCELLEMESİ (ZOOM HAFIZASI EKLENDİ) ---
+        # --- HTML/JS KISMI (SMOOTH TRANSITION + ZOOM HAFIZASI) ---
         html_code = f"""
         <!DOCTYPE html>
         <html>
@@ -160,10 +159,13 @@ def render_dashboard():
                     border-radius: 5px;
                     overflow-x: auto;
                     overflow-y: hidden;
-                    opacity: 0; /* Titreme için başlangıçta gizli */
+                    
+                    /* SMOOTH GEÇİŞ GERİ GELDİ */
+                    opacity: 0;
+                    transition: opacity 0.4s ease-in-out; 
                 }}
                 #content-box {{
-                    width: {calc_width}px; /* Python'dan gelen varsayılan genişlik */
+                    width: {calc_width}px;
                     height: 540px;
                 }}
                 .zoom-controls {{
@@ -194,22 +196,19 @@ def render_dashboard():
                 var contentBox = document.getElementById("content-box");
                 
                 var scrollKey = "scrollPos_Tunagenc_v2";
-                var widthKey = "chartWidth_Tunagenc_v2"; // Genişlik için yeni hafıza
+                var widthKey = "chartWidth_Tunagenc_v2"; 
 
-                // --- 1. ZOOM (GENİŞLİK) AYARINI YÜKLE ---
+                // --- 1. ZOOM (GENİŞLİK) YÜKLE ---
                 var savedWidth = sessionStorage.getItem(widthKey);
                 if (savedWidth) {{
-                    // Eğer kullanıcı daha önce zoom yaptıysa, o boyutu kullan
                     contentBox.style.width = savedWidth + "px";
-                    
-                    // Plotly'ye grafiği yeni boyuta uydurmasını söyle
                     var plotDiv = document.getElementById('amfi_chart');
                     if (plotDiv && window.Plotly) {{ 
                         Plotly.Plots.resize(plotDiv); 
                     }}
                 }}
 
-                // --- 2. SCROLL POZİSYONUNU YÜKLE ---
+                // --- 2. SCROLL POZİSYONU YÜKLE ---
                 var savedPos = sessionStorage.getItem(scrollKey);
                 if (savedPos !== null) {{
                     wrapper.scrollLeft = parseInt(savedPos);
@@ -217,8 +216,12 @@ def render_dashboard():
                     wrapper.scrollLeft = wrapper.scrollWidth;
                 }}
 
-                // --- 3. GÖRÜNÜR YAP (Titremesiz) ---
-                wrapper.style.opacity = "1";
+                // --- 3. SMOOTH ANİMASYON ---
+                // Browser'a 'bir sonraki karede' opaklığı artırmasını söylüyoruz.
+                // Bu sayede CSS transition devreye giriyor.
+                requestAnimationFrame(function() {{
+                    wrapper.style.opacity = "1";
+                }});
 
                 // --- EVENTS ---
                 wrapper.addEventListener("scroll", function() {{
@@ -228,15 +231,9 @@ def render_dashboard():
                 function resizeChart(multiplier) {{
                     var currentWidth = contentBox.offsetWidth;
                     var newWidth = currentWidth * multiplier;
-                    
-                    // Minimum sınır (Çok küçülmesin)
                     if (newWidth < 600) newWidth = 600;
-                    
                     contentBox.style.width = newWidth + "px";
-                    
-                    // Yeni genişliği hafızaya kaydet
                     sessionStorage.setItem(widthKey, newWidth);
-                    
                     var plotDiv = document.getElementById('amfi_chart');
                     if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
                 }}
