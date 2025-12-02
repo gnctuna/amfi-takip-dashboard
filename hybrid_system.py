@@ -4,43 +4,43 @@ import paho.mqtt.client as mqtt
 import json
 import time
 import sys
+from datetime import datetime
 
-# --- VARSAYILAN VE ORTAK AYARLAR ---
-DEFAULT_MODE = "SINIF" 
+# --- GENEL AYARLAR ---
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
-TIME_THRESHOLD = 0.5 # Stabilite filtresi (saniye)
 
 def main():
-    # 1. MODU SEÇ (Konsoldan argüman alma)
+    # 1. MODU SEÇ (Konsoldan)
     if len(sys.argv) > 1:
         SCENARIO = sys.argv[1].upper()
     else:
-        SCENARIO = DEFAULT_MODE
-    
-    # 2. Senaryoya Göre Ayarları Yükle
-    # NOT: Tracking için daha hafif modeller seçildi (FPS artışı için)
+        SCENARIO = "SINIF" # Varsayılan
+
+    print(f"🚀 SİSTEM BAŞLATILIYOR: {SCENARIO} MODU")
+
+    # --- SENARYOYA GÖRE MODEL VE STRATEJİ SEÇİMİ ---
     if SCENARIO == "AMFI":
-        model_name = 'yolov8s.pt' # Small Model (Hız ve Başarı Dengesi)
-        img_size = 1280
-        sleep_time = 60           
-        conf_thres = 0.35
+        # AMFİ: En güçlü model, ama yavaş çalışsa da olur (Snapshot)
+        model_name = "yolov8x.pt" 
+        print(f"📸 Mod: SNAPSHOT (Her 5 dakikada bir analiz)")
+        print(f"🧠 Model: {model_name} (Extra Large - Maksimum Detay)")
+        interval = 300 # 300 saniye = 5 Dakika (Test için bunu 10 yapabilirsin)
         
     elif SCENARIO == "SINIF":
-        model_name = 'yolov8n.pt' # Nano Model (En Hızlısı)
-        img_size = 640
-        sleep_time = 0.01         # Canlı akış için bekleme süresini kıstık
-        conf_thres = 0.50         
-        
+        # SINIF: En hızlı model, sürekli akış (Real-time Tracking)
+        model_name = "yolov8n.pt"
+        print(f"🎥 Mod: CANLI TAKİP (Real-time Tracking)")
+        print(f"🧠 Model: {model_name} (Nano - Yüksek FPS)")
     else:
-        print("❌ HATA: Geçersiz Mod! Lütfen 'AMFI' veya 'SINIF' yazın.")
+        print("❌ HATA: Geçersiz mod. 'AMFI' veya 'SINIF' yazın.")
         return
 
-    print(f"🚀 TRACKING SİSTEMİ BAŞLATILIYOR: MOD -> {SCENARIO}")
-    print(f"🧠 Model Yükleniyor: {model_name}...")
-    
-    # 3. Model ve MQTT Yükleme
+    # Modeli Yükle
+    print("⏳ Model yükleniyor...")
     model = YOLO(model_name)
+    
+    # MQTT Bağlantısı
     client = mqtt.Client()
     try:
         client.connect(MQTT_BROKER, 1883, 60)
@@ -48,97 +48,96 @@ def main():
     except:
         print("⚠️ İnternet yok, yerel modda çalışıyor.")
 
-    # Kamerayı Başlat
-    cap = cv2.VideoCapture(0)
-    
-    # Mac/PC Kamera Çözünürlüğü Ayarı
-    cap.set(3, 1280)
-    cap.set(4, 720)
-
-    if not cap.isOpened():
-        print("❌ HATA: Kamera açılamadı!")
-        return
-
-    # --- FİLTRE DEĞİŞKENLERİ ---
-    official_count = 0 
-    candidate_count = 0
-    first_seen_time = time.time() 
-
-    print("🎥 Kayıt Başladı! Çıkmak için 'q' tuşuna bas.")
-
-    while True:
-        success, frame = cap.read()
-        if not success: break
-
-        # [cite_start]4. TRACKING (TAKİP) İŞLEMİ [cite: 1]
-        # persist=True -> Bir önceki karedeki kişileri hatırla demektir.
-        # tracker="bytetrack.yaml" -> Hızlı ve stabil bir takip algoritmasıdır.
-        results = model.track(frame, persist=True, classes=0, imgsz=img_size, conf=conf_thres, verbose=False, tracker="bytetrack.yaml")
-        
-        # Anlık tespit edilen kişi sayısı (Takip edilen ID sayısı)
-        instant_count = 0
-        
-        # Sonuçları Görselleştirme
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                instant_count += 1
-                
-                # Koordinatları al
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                
-                # Takip ID'sini al (Eğer ID atanmışsa)
-                track_id = int(box.id[0]) if box.id is not None else 0
-                
-                # Kutuyu çiz
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                
-                # ID numarasını kafasının üstüne yaz
-                cv2.putText(frame, f"ID: {track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-        # --- SINIF MODU FİLTRESİ ---
-        if SCENARIO == "SINIF":
-            if instant_count == candidate_count:
-                duration = time.time() - first_seen_time
-                if duration >= TIME_THRESHOLD:
-                    official_count = candidate_count
-            else:
-                candidate_count = instant_count
-                first_seen_time = time.time()
-        else:
-            official_count = instant_count
-
-        # 5. BULUTA GÖNDER
-        payload = {
-            "room_id": "Mac-Kamera",
-            "mode": SCENARIO,
-            "occupancy": official_count,
-            "status": "Crowded" if official_count > 5 else "Normal",
-            "timestamp": time.time()
-        }
-        
-        try:
-            client.publish(MQTT_TOPIC, json.dumps(payload))
-        except:
-            pass
-
-        # 6. BİLGİ EKRANI
-        cv2.putText(frame, f"Mode: {SCENARIO}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-        cv2.putText(frame, f"Count: {official_count}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        
-        cv2.imshow('YOLOv8 Live Tracking', frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'): break
+    # ==========================================
+    # SENARYO 1: AMFİ (SNAPSHOT / ARALIKLI)
+    # ==========================================
+    if SCENARIO == "AMFI":
+        while True:
+            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Kamera açılıyor...")
             
-        # Uyku Süresi (AMFI modunda gereksiz işlem yapmamak için)
-        if SCENARIO == "AMFI":
-            # Bekleme sırasında tuşa basılırsa çık
-            if cv2.waitKey(int(sleep_time * 1000)) & 0xFF == ord('q'): break
-        else:
-            time.sleep(sleep_time)
+            # Kamerayı Aç
+            cap = cv2.VideoCapture(0)
+            cap.set(3, 1280) # Yüksek çözünürlük
+            cap.set(4, 720)
+            
+            # Işık ayarı için ısınma turları (5 kare boşa çek)
+            for _ in range(5):
+                cap.read()
+                
+            success, frame = cap.read()
+            
+            # Fotoğrafı alır almaz kamerayı kapat (Gizlilik + Enerji Tasarrufu)
+            cap.release()
+            
+            if success:
+                print("🧠 Görüntü analiz ediliyor (Extra Large Model)...")
+                # Tracking değil Predict kullanıyoruz (Tek kare olduğu için)
+                results = model.predict(frame, classes=0, conf=0.25, verbose=False)
+                
+                count = len(results[0].boxes)
+                print(f"✅ Sayım Sonucu: {count} Kişi")
+                
+                # Veriyi Gönder
+                payload = {
+                    "mode": "AMFI_SNAPSHOT",
+                    "occupancy": count,
+                    "status": "Crowded" if count > 20 else "Normal",
+                    "timestamp": time.time()
+                }
+                client.publish(MQTT_TOPIC, json.dumps(payload))
+            
+            else:
+                print("❌ Kamera hatası!")
 
-    cap.release()
-    cv2.destroyAllWindows()
+            # 5 Dakika Uyu
+            print(f"💤 Sistem {interval} saniye uykuya geçiyor...")
+            time.sleep(interval)
+
+    # ==========================================
+    # SENARYO 2: SINIF (CANLI / TRACKING)
+    # ==========================================
+    elif SCENARIO == "SINIF":
+        # Kamerayı bir kere aç ve hep açık tut
+        cap = cv2.VideoCapture(0)
+        cap.set(3, 640) # Hız için daha düşük çözünürlük yeterli
+        cap.set(4, 480)
+        
+        print("🎥 Canlı yayın başladı. Çıkmak için 'q'ya basın.")
+        
+        while True:
+            success, frame = cap.read()
+            if not success: break
+            
+            # CANLI TAKİP (Tracking)
+            # persist=True -> Kişi ID'lerini hatırla
+            results = model.track(frame, persist=True, classes=0, verbose=False)
+            
+            # ID sayısını al (Kutu sayısı yerine ID sayısı daha stabildir)
+            current_count = 0
+            if results[0].boxes.id is not None:
+                current_count = len(results[0].boxes.id)
+            
+            # Görselleştirme (Ekrana çiz)
+            annotated_frame = results[0].plot()
+            cv2.putText(annotated_frame, f"Canli: {current_count}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+            cv2.imshow("SINIF MODU - Canli Takip", annotated_frame)
+            
+            # Veriyi sürekli göndermek yerine sadece değişim olduğunda 
+            # veya belli aralıklarla göndermek daha iyidir ama şimdilik gönderiyoruz:
+            payload = {
+                "mode": "SINIF_LIVE",
+                "occupancy": current_count,
+                "status": "Crowded" if current_count > 10 else "Normal",
+                "timestamp": time.time()
+            }
+            client.publish(MQTT_TOPIC, json.dumps(payload))
+            
+            # Çıkış kontrolü
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        
+        cap.release()
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
