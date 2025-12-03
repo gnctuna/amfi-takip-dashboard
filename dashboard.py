@@ -49,7 +49,6 @@ def get_latest_data(limit=MAX_DISPLAY_CARDS):
     conn.close()
     
     if not df.empty:
-        # Veriyi eskiden yeniye sırala (Kartlar için)
         df = df.iloc[::-1].reset_index(drop=True)
     return df
 
@@ -111,35 +110,25 @@ def generate_html_cards(df):
         
     return cards_html
 
-# --- ARAYÜZ ALANLARI ---
-# Başlık ve Sayaç için alan (En tepede)
+# --- ARAYÜZ ---
 header_placeholder = st.empty()
-
-# Kartlar için alan (Onun altında)
 timeline_placeholder = st.empty()
-
 info_box = st.empty()
 
 def render_dashboard():
     df = get_latest_data()
     
     if not df.empty:
-        # En son veriyi al
-        # Not: df'yi ters çevirmiştik (eskiden yeniye), o yüzden son satır en yeni veridir.
         last_row = df.iloc[-1]
         current_count = int(last_row['count'])
         st.session_state.last_count = current_count
         
-        # --- 1. HEADER BÖLÜMÜ (Başlık + Canlı Sayaç) ---
+        # 1. Header (Canlı Sayı)
         with header_placeholder.container():
-            # Sütunları ayarla: Sol (Geniş), Sağ (Dar)
             c1, c2 = st.columns([6, 1]) 
-            
             with c1:
                 st.title("🔢 Canlı Veri Akışı")
-            
             with c2:
-                # Sayacı HTML/CSS ile stilize edip gösteriyoruz
                 st.markdown(
                     f"""
                     <div style="
@@ -158,9 +147,10 @@ def render_dashboard():
                     unsafe_allow_html=True
                 )
         
-        # --- 2. KART BÖLÜMÜ (Timeline) ---
+        # 2. Kartlar
         inner_html = generate_html_cards(df)
         
+        # --- HTML/JS: STICKY SCROLL MANTIĞI EKLENDİ ---
         full_html = f"""
         <!DOCTYPE html>
         <html>
@@ -175,8 +165,6 @@ def render_dashboard():
                     gap: 15px;
                     padding: 20px;
                     padding-bottom: 10px;
-                    
-                    /* Titreme Önleyici */
                     opacity: 0;
                     transition: opacity 0.2s ease-in;
                     
@@ -219,24 +207,39 @@ def render_dashboard():
 
             <script>
                 var container = document.getElementById('scroll-container');
-                var storageKey = "cardScrollPos_Final_v1";
+                
+                var posKey = "scrollPos_Sticky_v1";
+                var endKey = "isAtEnd_Sticky_v1"; // "Kullanıcı en sonda mı?" bilgisi
 
-                // 1. POZİSYONU YÜKLE
-                var savedPos = sessionStorage.getItem(storageKey);
-                if (savedPos !== null) {{
-                    container.scrollLeft = parseInt(savedPos);
-                }} else {{
+                // --- 1. KONUMU GERİ YÜKLE ---
+                var wasAtEnd = sessionStorage.getItem(endKey);
+                var savedPos = sessionStorage.getItem(posKey);
+                
+                if (wasAtEnd === "true" || wasAtEnd === null) {{
+                    // Eğer kullanıcı daha önce EN SONDA ise (veya ilk girişse)
+                    // Onu yeni eklenen verinin olduğu en sağa götür.
                     container.scrollLeft = container.scrollWidth;
+                }} else {{
+                    // Kullanıcı geçmişe bakıyordu, olduğu yerde bırak.
+                    container.scrollLeft = parseInt(savedPos);
                 }}
 
-                // 2. GÖRÜNÜR YAP
+                // --- 2. GÖRÜNÜR YAP ---
                 requestAnimationFrame(function() {{
                     container.style.opacity = "1";
                 }});
 
-                // 3. KAYDET
+                // --- 3. DİNLE VE KAYDET ---
                 container.addEventListener("scroll", function() {{
-                    sessionStorage.setItem(storageKey, container.scrollLeft);
+                    // Mevcut konumu kaydet
+                    sessionStorage.setItem(posKey, container.scrollLeft);
+                    
+                    // Hesaplama: Kullanıcı en sağa çok yakın mı? (Tolerans 10px)
+                    // scrollLeft + clientWidth = Görünen alanın sağ ucu
+                    var atEnd = (container.scrollLeft + container.clientWidth >= container.scrollWidth - 10);
+                    
+                    // Durumu kaydet ("true" veya "false")
+                    sessionStorage.setItem(endKey, atEnd);
                 }});
             </script>
         </body>
@@ -249,10 +252,8 @@ def render_dashboard():
     else:
         info_box.info("Henüz veri yok. Bekleniyor...")
 
-# İlk Çalıştırma
 render_dashboard()
 
-# Ana Döngü
 while True:
     if not data_queue.empty():
         should_refresh = False
