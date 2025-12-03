@@ -12,7 +12,7 @@ from datetime import datetime
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
 DB_FILE = "occupancy_system.db" 
-MAX_DISPLAY_CARDS = 100 # Ekranda geriye dönük en fazla kaç kutu gözüksün?
+MAX_DISPLAY_CARDS = 100 
 
 st.set_page_config(page_title="Canlı Takip Şeridi", layout="wide", page_icon="🔢")
 
@@ -44,13 +44,12 @@ def insert_data(count, status, mode):
 
 def get_latest_data(limit=MAX_DISPLAY_CARDS):
     conn = sqlite3.connect(DB_FILE)
-    # En son gelenleri al (Tarihe göre tersten çekiyoruz ama gösterirken düzelteceğiz)
     query = f"SELECT timestamp, count, status, mode FROM records ORDER BY id DESC LIMIT {limit}"
     df = pd.read_sql_query(query, conn)
     conn.close()
     
     if not df.empty:
-        # Veriyi kronolojik sıraya sok (Eskiden -> Yeniye)
+        # Veriyi eskiden yeniye sırala
         df = df.iloc[::-1].reset_index(drop=True)
     return df
 
@@ -88,12 +87,10 @@ def generate_html_cards(df):
     cards_html = ""
     
     for index, row in df.iterrows():
-        # Tarih ve Saati Ayır
-        full_time = row['timestamp'] # Örn: 2023-12-05 14:30:22
-        date_part = full_time.split(" ")[0] # 2023-12-05
-        time_part = full_time.split(" ")[1] # 14:30:22
+        full_time = row['timestamp']
+        date_part = full_time.split(" ")[0]
+        time_part = full_time.split(" ")[1]
         
-        # Tarihi Gün/Ay/Yıl formatına çevir
         try:
             date_obj = datetime.strptime(date_part, '%Y-%m-%d')
             formatted_date = date_obj.strftime('%d/%m/%Y')
@@ -102,7 +99,6 @@ def generate_html_cards(df):
 
         count = row['count']
         
-        # Kart HTML Yapısı
         cards_html += f"""
         <div class="card">
             <div class="card-header">Kişi Sayısı</div>
@@ -125,14 +121,12 @@ def render_dashboard():
     df = get_latest_data()
     
     if not df.empty:
-        # Son veriyi hafızaya al
         last_row = df.iloc[-1]
         st.session_state.last_count = int(last_row['count'])
         
-        # HTML Kartlarını Hazırla
         inner_html = generate_html_cards(df)
         
-        # Tam HTML Yapısı (CSS + JS Dahil)
+        # --- GÜNCELLENMİŞ HTML/JS (Scroll Hafızası Eklendi) ---
         full_html = f"""
         <!DOCTYPE html>
         <html>
@@ -140,7 +134,6 @@ def render_dashboard():
             <style>
                 body {{ margin: 0; background-color: #0e1117; font-family: 'Segoe UI', sans-serif; }}
                 
-                /* YATAY KAYDIRMA KAPSAYICISI */
                 #scroll-container {{
                     display: flex;
                     flex-direction: row;
@@ -148,20 +141,20 @@ def render_dashboard():
                     gap: 15px;
                     padding: 20px;
                     padding-bottom: 10px;
-                    scroll-behavior: smooth;
                     
-                    /* Scrollbar Stili */
+                    /* TİTREME ÖNLEYİCİ: Başlangıçta gizli */
+                    opacity: 0;
+                    transition: opacity 0.2s ease-in;
+                    
                     scrollbar-width: thin;
                     scrollbar-color: #29b5e8 #1e1e1e;
                 }}
                 
-                /* Webkit Scrollbar (Chrome/Safari) */
                 #scroll-container::-webkit-scrollbar {{ height: 10px; }}
                 #scroll-container::-webkit-scrollbar-track {{ background: #1e1e1e; border-radius: 5px; }}
                 #scroll-container::-webkit-scrollbar-thumb {{ background: #444; border-radius: 5px; }}
                 #scroll-container::-webkit-scrollbar-thumb:hover {{ background: #29b5e8; }}
 
-                /* KART TASARIMI */
                 .card {{
                     background: linear-gradient(145deg, #1e1e1e, #252525);
                     min-width: 140px;
@@ -175,20 +168,15 @@ def render_dashboard():
                     display: flex;
                     flex-direction: column;
                     justify-content: space-between;
-                    transition: transform 0.2s;
                 }}
                 
-                .card:hover {{
-                    transform: translateY(-5px);
-                    border-color: #29b5e8;
-                }}
+                .card:hover {{ transform: translateY(-3px); border-color: #29b5e8; }}
                 
                 .card-header {{ font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }}
                 .count-value {{ font-size: 36px; font-weight: bold; color: #29b5e8; margin: 5px 0; }}
                 .divider {{ height: 1px; background: #444; margin: 10px 0; width: 100%; }}
                 .time-info {{ font-size: 16px; font-weight: 600; color: #eee; margin-bottom: 2px; }}
                 .date-info {{ font-size: 12px; color: #aaa; }}
-                
             </style>
         </head>
         <body>
@@ -198,17 +186,28 @@ def render_dashboard():
 
             <script>
                 var container = document.getElementById('scroll-container');
+                var storageKey = "cardScrollPos_v1"; // Hafıza anahtarı
+
+                // 1. POZİSYONU YÜKLE
+                var savedPos = sessionStorage.getItem(storageKey);
                 
-                // Akıllı Scroll Mantığı:
-                // Eğer kullanıcı geçmişe bakmıyorsa (yani en sağdaysa), yeni veri gelince sağa kaydır.
-                // Kullanıcı sola kaydırdıysa onu rahatsız etme.
-                
-                function scrollToRight() {{
+                if (savedPos !== null) {{
+                    // Eğer hafızada konum varsa oraya git
+                    container.scrollLeft = parseInt(savedPos);
+                }} else {{
+                    // İlk defa açılıyorsa EN SONA (Sağa) git
                     container.scrollLeft = container.scrollWidth;
                 }}
-                
-                // Sayfa ilk yüklendiğinde en sona git
-                setTimeout(scrollToRight, 100);
+
+                // 2. GÖRÜNÜR YAP (Konum ayarlandıktan sonra)
+                requestAnimationFrame(function() {{
+                    container.style.opacity = "1";
+                }});
+
+                // 3. SCROLL DİNLEYİCİSİ (Her kaydırmayı kaydet)
+                container.addEventListener("scroll", function() {{
+                    sessionStorage.setItem(storageKey, container.scrollLeft);
+                }});
             </script>
         </body>
         </html>
@@ -220,10 +219,8 @@ def render_dashboard():
     else:
         info_box.info("Henüz veri yok. Bekleniyor...")
 
-# İlk Açılış
 render_dashboard()
 
-# Ana Döngü
 while True:
     if not data_queue.empty():
         should_refresh = False
@@ -233,7 +230,6 @@ while True:
             status = payload.get('status', 'Normal')
             mode = payload.get('mode', 'UNKNOWN')
             
-            # Sadece sayı değiştiyse kaydet
             if new_count != st.session_state.last_count:
                 insert_data(new_count, status, mode)
                 st.session_state.last_count = new_count
