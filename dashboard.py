@@ -5,7 +5,6 @@ import json
 import time
 import sqlite3
 import queue
-import plotly.express as px
 import streamlit.components.v1 as components
 from datetime import datetime
 
@@ -13,9 +12,9 @@ from datetime import datetime
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_TOPIC = "tunagenc/occupancy"
 DB_FILE = "occupancy_system.db" 
-MAX_DISPLAY_ROWS = 2000 
+MAX_DISPLAY_CARDS = 100 # Ekranda geriye dönük en fazla kaç kutu gözüksün?
 
-st.set_page_config(page_title="Canlı Amfi Paneli", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Canlı Takip Şeridi", layout="wide", page_icon="🔢")
 
 # --- SESSION STATE ---
 if 'last_count' not in st.session_state:
@@ -43,15 +42,16 @@ def insert_data(count, status, mode):
     conn.commit()
     conn.close()
 
-def get_latest_data(limit=MAX_DISPLAY_ROWS):
+def get_latest_data(limit=MAX_DISPLAY_CARDS):
     conn = sqlite3.connect(DB_FILE)
+    # En son gelenleri al (Tarihe göre tersten çekiyoruz ama gösterirken düzelteceğiz)
     query = f"SELECT timestamp, count, status, mode FROM records ORDER BY id DESC LIMIT {limit}"
     df = pd.read_sql_query(query, conn)
     conn.close()
     
     if not df.empty:
+        # Veriyi kronolojik sıraya sok (Eskiden -> Yeniye)
         df = df.iloc[::-1].reset_index(drop=True)
-        df.rename(columns={'timestamp': 'Zaman', 'count': 'Kişi', 'status': 'Durum', 'mode': 'Mod'}, inplace=True)
     return df
 
 init_db()
@@ -83,187 +83,147 @@ def start_mqtt():
 data_queue = get_message_queue()
 start_mqtt()
 
-# --- GRAFİK OLUŞTURUCU ---
-def create_figure(df):
-    if df.empty: return None, 500
+# --- HTML KART OLUŞTURUCU ---
+def generate_html_cards(df):
+    cards_html = ""
     
-    POINT_WIDTH_PX = 40 
-    dynamic_width = max(800, len(df) * POINT_WIDTH_PX)
-
-    fig = px.line(
-        df, 
-        x='Zaman', 
-        y="Kişi", 
-        markers=True,
-        color_discrete_sequence=['#29b5e8'],
-        hover_data={'Kişi': True, 'Zaman': True, 'Durum': True, 'Mod': True}
-    )
-    
-    # 1. ÇİZGİ KALINLIĞI VE KESİLMEME AYARI
-    # width=3.5: Çizgi çok kalın olsun ki dik çıkışlarda kaybolmasın.
-    # cliponaxis=False: Çizgi grafiğin sınırına değerse kesilmesin.
-    fig.update_traces(line=dict(width=3.5), marker=dict(size=8), cliponaxis=False)
-    
-    fig.update_layout(
-        xaxis_title="", 
-        yaxis_title="Kişi Sayısı",
-        template="plotly_dark",
+    for index, row in df.iterrows():
+        # Tarih ve Saati Ayır
+        full_time = row['timestamp'] # Örn: 2023-12-05 14:30:22
+        date_part = full_time.split(" ")[0] # 2023-12-05
+        time_part = full_time.split(" ")[1] # 14:30:22
         
-        autosize=True, # Otomatik boyutlandırma açık (Dikeyde ekrana sığacak)
-        height=None, 
-        width=None,
-        
-        margin=dict(l=20, r=20, t=30, b=20),
-        dragmode=False, 
-        paper_bgcolor='#0e1117', 
-        plot_bgcolor='#0e1117',
-        xaxis=dict(showgrid=True, gridcolor='#333', type='category'),
-        yaxis=dict(showgrid=True, gridcolor='#333'),
-    )
+        # Tarihi Gün/Ay/Yıl formatına çevir
+        try:
+            date_obj = datetime.strptime(date_part, '%Y-%m-%d')
+            formatted_date = date_obj.strftime('%d/%m/%Y')
+        except:
+            formatted_date = date_part
 
-    fig.update_xaxes(showticklabels=False, fixedrange=True)
-    fig.update_yaxes(fixedrange=True)
-    
-    return fig, dynamic_width
+        count = row['count']
+        
+        # Kart HTML Yapısı
+        cards_html += f"""
+        <div class="card">
+            <div class="card-header">Kişi Sayısı</div>
+            <div class="count-value">{count}</div>
+            <div class="divider"></div>
+            <div class="time-info">🕒 {time_part}</div>
+            <div class="date-info">📅 {formatted_date}</div>
+        </div>
+        """
+        
+    return cards_html
 
 # --- ARAYÜZ ---
-st.title("🏫 Akıllı Kampüs - Canlı Takip")
+st.title("🔢 Canlı Veri Akışı")
 
-metric_col = st.empty()
-chart_placeholder = st.empty()
+timeline_placeholder = st.empty()
 info_box = st.empty()
 
 def render_dashboard():
     df = get_latest_data()
     
     if not df.empty:
+        # Son veriyi hafızaya al
         last_row = df.iloc[-1]
-        st.session_state.last_count = int(last_row['Kişi'])
-
-        with metric_col.container():
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Anlık Kişi", last_row['Kişi'])
-            status_icon = "🔴 Kalabalık" if last_row['Durum'] == 'Crowded' else "🟢 Normal"
-            c2.metric("Durum", status_icon)
-            c3.metric("Son Veri", last_row['Zaman'].split(" ")[1])
-            c4.metric("Aktif Mod", last_row['Mod'])
-
-        fig, calc_width = create_figure(df)
-        fig_html = fig.to_html(div_id="amfi_chart", include_plotlyjs='cdn', full_html=True, config={'displayModeBar': False, 'responsive': True})
+        st.session_state.last_count = int(last_row['count'])
         
-        # --- HTML/JS KISMI (SADELEŞTİRİLDİ: SADECE YATAY ZOOM) ---
-        html_code = f"""
+        # HTML Kartlarını Hazırla
+        inner_html = generate_html_cards(df)
+        
+        # Tam HTML Yapısı (CSS + JS Dahil)
+        full_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <style>
-                body {{ margin: 0; background-color: #0e1117; font-family: sans-serif; }}
+                body {{ margin: 0; background-color: #0e1117; font-family: 'Segoe UI', sans-serif; }}
                 
-                #wrapper {{
-                    width: 100%;
-                    height: 550px; 
-                    position: relative;
+                /* YATAY KAYDIRMA KAPSAYICISI */
+                #scroll-container {{
+                    display: flex;
+                    flex-direction: row;
+                    overflow-x: auto;
+                    gap: 15px;
+                    padding: 20px;
+                    padding-bottom: 10px;
+                    scroll-behavior: smooth;
+                    
+                    /* Scrollbar Stili */
+                    scrollbar-width: thin;
+                    scrollbar-color: #29b5e8 #1e1e1e;
+                }}
+                
+                /* Webkit Scrollbar (Chrome/Safari) */
+                #scroll-container::-webkit-scrollbar {{ height: 10px; }}
+                #scroll-container::-webkit-scrollbar-track {{ background: #1e1e1e; border-radius: 5px; }}
+                #scroll-container::-webkit-scrollbar-thumb {{ background: #444; border-radius: 5px; }}
+                #scroll-container::-webkit-scrollbar-thumb:hover {{ background: #29b5e8; }}
+
+                /* KART TASARIMI */
+                .card {{
+                    background: linear-gradient(145deg, #1e1e1e, #252525);
+                    min-width: 140px;
+                    max-width: 140px;
                     border: 1px solid #333;
-                    border-radius: 5px;
-                    overflow-x: auto; /* Sadece YATAY scroll */
-                    overflow-y: hidden; /* Dikey scroll yasak */
-                    opacity: 0;
-                    transition: opacity 0.3s ease-in;
-                }}
-
-                /* Scrollbar */
-                ::-webkit-scrollbar {{ width: 8px; height: 8px; }}
-                ::-webkit-scrollbar-track {{ background: #111; }}
-                ::-webkit-scrollbar-thumb {{ background: #444; border-radius: 4px; }}
-                ::-webkit-scrollbar-thumb:hover {{ background: #29b5e8; }}
-
-                #content-box {{
-                    width: {calc_width}px;
-                    height: 100%; /* Yükseklik Wrapper'a uysun */
-                }}
-
-                .controls-container {{
-                    position: fixed; top: 20px; right: 40px; z-index: 9999;
-                    display: flex; gap: 10px;
-                    background: rgba(14, 17, 23, 0.9);
-                    padding: 6px; border-radius: 8px; border: 1px solid #444;
+                    border-radius: 12px;
+                    padding: 15px;
+                    text-align: center;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+                    color: white;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                    transition: transform 0.2s;
                 }}
                 
-                .control-group {{ display: flex; gap: 4px; align-items: center; }}
-                .label {{ color: #eee; font-size: 14px; margin-right: 4px; font-weight: bold; }}
-
-                .btn {{
-                    background: rgba(41, 181, 232, 0.15); color: #29b5e8; border: 1px solid #29b5e8;
-                    border-radius: 4px; width: 32px; height: 32px; font-size: 18px; cursor: pointer;
-                    display: flex; align-items: center; justify-content: center; user-select: none;
+                .card:hover {{
+                    transform: translateY(-5px);
+                    border-color: #29b5e8;
                 }}
-                .btn:hover {{ background: #29b5e8; color: white; }}
-                .btn:active {{ background: #1a7ca0; transform: scale(0.95); }}
+                
+                .card-header {{ font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }}
+                .count-value {{ font-size: 36px; font-weight: bold; color: #29b5e8; margin: 5px 0; }}
+                .divider {{ height: 1px; background: #444; margin: 10px 0; width: 100%; }}
+                .time-info {{ font-size: 16px; font-weight: 600; color: #eee; margin-bottom: 2px; }}
+                .date-info {{ font-size: 12px; color: #aaa; }}
+                
             </style>
         </head>
         <body>
-            <div id="wrapper">
-                <div class="controls-container">
-                    <div class="control-group">
-                        <span class="label">↔ Genişlet/Daralt</span>
-                        <div class="btn" onclick="resizeWidth(0.8)">-</div>
-                        <div class="btn" onclick="resizeWidth(1.2)">+</div>
-                    </div>
-                </div>
-                <div id="content-box">
-                    {fig_html}
-                </div>
+            <div id="scroll-container">
+                {inner_html}
             </div>
 
             <script>
-                var wrapper = document.getElementById("wrapper");
-                var contentBox = document.getElementById("content-box");
+                var container = document.getElementById('scroll-container');
                 
-                var scrollXKey = "scrollX_Clean_v1";
-                var widthKey = "chartWidth_Clean_v1"; 
-
-                // 1. GENİŞLİĞİ YÜKLE
-                var savedWidth = sessionStorage.getItem(widthKey);
-                if (savedWidth) {{ contentBox.style.width = savedWidth + "px"; }}
+                // Akıllı Scroll Mantığı:
+                // Eğer kullanıcı geçmişe bakmıyorsa (yani en sağdaysa), yeni veri gelince sağa kaydır.
+                // Kullanıcı sola kaydırdıysa onu rahatsız etme.
                 
-                var plotDiv = document.getElementById('amfi_chart');
-                if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
-
-                // 2. SCROLL KONUMUNU YÜKLE
-                var savedX = sessionStorage.getItem(scrollXKey);
-                if (savedX !== null) {{ wrapper.scrollLeft = parseInt(savedX); }} 
-                else {{ wrapper.scrollLeft = wrapper.scrollWidth; }}
-
-                // 3. GÖRÜNÜR YAP
-                requestAnimationFrame(function() {{
-                    wrapper.style.opacity = "1";
-                }});
-
-                // EVENTS
-                wrapper.addEventListener("scroll", function() {{
-                    sessionStorage.setItem(scrollXKey, wrapper.scrollLeft);
-                }});
-
-                function resizeWidth(multiplier) {{
-                    var current = contentBox.offsetWidth;
-                    var newVal = Math.max(600, current * multiplier);
-                    contentBox.style.width = newVal + "px";
-                    sessionStorage.setItem(widthKey, newVal);
-                    if (plotDiv && window.Plotly) {{ Plotly.Plots.resize(plotDiv); }}
+                function scrollToRight() {{
+                    container.scrollLeft = container.scrollWidth;
                 }}
+                
+                // Sayfa ilk yüklendiğinde en sona git
+                setTimeout(scrollToRight, 100);
             </script>
         </body>
         </html>
         """
         
-        with chart_placeholder.container():
-            components.html(html_code, height=560)
+        with timeline_placeholder.container():
+            components.html(full_html, height=240)
             
     else:
-        info_box.info("Veri bekleniyor...")
+        info_box.info("Henüz veri yok. Bekleniyor...")
 
+# İlk Açılış
 render_dashboard()
 
+# Ana Döngü
 while True:
     if not data_queue.empty():
         should_refresh = False
@@ -273,6 +233,7 @@ while True:
             status = payload.get('status', 'Normal')
             mode = payload.get('mode', 'UNKNOWN')
             
+            # Sadece sayı değiştiyse kaydet
             if new_count != st.session_state.last_count:
                 insert_data(new_count, status, mode)
                 st.session_state.last_count = new_count
@@ -281,4 +242,4 @@ while True:
         if should_refresh:
             render_dashboard()
             
-    time.sleep(1)
+    time.sleep(0.5)
