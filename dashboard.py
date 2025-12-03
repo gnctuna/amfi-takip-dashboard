@@ -49,7 +49,7 @@ def get_latest_data(limit=MAX_DISPLAY_CARDS):
     conn.close()
     
     if not df.empty:
-        # Veriyi eskiden yeniye sırala
+        # Veriyi eskiden yeniye sırala (Kartlar için)
         df = df.iloc[::-1].reset_index(drop=True)
     return df
 
@@ -111,22 +111,56 @@ def generate_html_cards(df):
         
     return cards_html
 
-# --- ARAYÜZ ---
-st.title("🔢 Canlı Veri Akışı")
+# --- ARAYÜZ ALANLARI ---
+# Başlık ve Sayaç için alan (En tepede)
+header_placeholder = st.empty()
 
+# Kartlar için alan (Onun altında)
 timeline_placeholder = st.empty()
+
 info_box = st.empty()
 
 def render_dashboard():
     df = get_latest_data()
     
     if not df.empty:
+        # En son veriyi al
+        # Not: df'yi ters çevirmiştik (eskiden yeniye), o yüzden son satır en yeni veridir.
         last_row = df.iloc[-1]
-        st.session_state.last_count = int(last_row['count'])
+        current_count = int(last_row['count'])
+        st.session_state.last_count = current_count
         
+        # --- 1. HEADER BÖLÜMÜ (Başlık + Canlı Sayaç) ---
+        with header_placeholder.container():
+            # Sütunları ayarla: Sol (Geniş), Sağ (Dar)
+            c1, c2 = st.columns([6, 1]) 
+            
+            with c1:
+                st.title("🔢 Canlı Veri Akışı")
+            
+            with c2:
+                # Sayacı HTML/CSS ile stilize edip gösteriyoruz
+                st.markdown(
+                    f"""
+                    <div style="
+                        background-color: #1e1e1e;
+                        border: 2px solid #29b5e8;
+                        border-radius: 10px;
+                        text-align: center;
+                        padding: 10px;
+                        margin-top: 10px;
+                        box-shadow: 0 0 10px rgba(41, 181, 232, 0.3);
+                    ">
+                        <div style="font-size: 12px; color: #aaa; margin-bottom: -5px;">ANLIK</div>
+                        <div style="font-size: 42px; font-weight: bold; color: #29b5e8;">{current_count}</div>
+                    </div>
+                    """, 
+                    unsafe_allow_html=True
+                )
+        
+        # --- 2. KART BÖLÜMÜ (Timeline) ---
         inner_html = generate_html_cards(df)
         
-        # --- GÜNCELLENMİŞ HTML/JS (Scroll Hafızası Eklendi) ---
         full_html = f"""
         <!DOCTYPE html>
         <html>
@@ -142,7 +176,7 @@ def render_dashboard():
                     padding: 20px;
                     padding-bottom: 10px;
                     
-                    /* TİTREME ÖNLEYİCİ: Başlangıçta gizli */
+                    /* Titreme Önleyici */
                     opacity: 0;
                     transition: opacity 0.2s ease-in;
                     
@@ -169,7 +203,6 @@ def render_dashboard():
                     flex-direction: column;
                     justify-content: space-between;
                 }}
-                
                 .card:hover {{ transform: translateY(-3px); border-color: #29b5e8; }}
                 
                 .card-header {{ font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }}
@@ -186,25 +219,22 @@ def render_dashboard():
 
             <script>
                 var container = document.getElementById('scroll-container');
-                var storageKey = "cardScrollPos_v1"; // Hafıza anahtarı
+                var storageKey = "cardScrollPos_Final_v1";
 
                 // 1. POZİSYONU YÜKLE
                 var savedPos = sessionStorage.getItem(storageKey);
-                
                 if (savedPos !== null) {{
-                    // Eğer hafızada konum varsa oraya git
                     container.scrollLeft = parseInt(savedPos);
                 }} else {{
-                    // İlk defa açılıyorsa EN SONA (Sağa) git
                     container.scrollLeft = container.scrollWidth;
                 }}
 
-                // 2. GÖRÜNÜR YAP (Konum ayarlandıktan sonra)
+                // 2. GÖRÜNÜR YAP
                 requestAnimationFrame(function() {{
                     container.style.opacity = "1";
                 }});
 
-                // 3. SCROLL DİNLEYİCİSİ (Her kaydırmayı kaydet)
+                // 3. KAYDET
                 container.addEventListener("scroll", function() {{
                     sessionStorage.setItem(storageKey, container.scrollLeft);
                 }});
@@ -219,8 +249,10 @@ def render_dashboard():
     else:
         info_box.info("Henüz veri yok. Bekleniyor...")
 
+# İlk Çalıştırma
 render_dashboard()
 
+# Ana Döngü
 while True:
     if not data_queue.empty():
         should_refresh = False
