@@ -47,10 +47,20 @@ def get_latest_data(limit=MAX_DISPLAY_CARDS):
     query = f"SELECT timestamp, count, status, mode FROM records ORDER BY id DESC LIMIT {limit}"
     df = pd.read_sql_query(query, conn)
     conn.close()
-    
     if not df.empty:
         df = df.iloc[::-1].reset_index(drop=True)
     return df
+
+# --- YENİ FONKSİYON: ORTALAMA HESAPLAMA ---
+def get_average_count():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    # Tüm kayıtların ortalamasını (AVG) al
+    c.execute("SELECT AVG(count) FROM records")
+    result = c.fetchone()[0]
+    conn.close()
+    # Eğer hiç veri yoksa 0 döndür, varsa 1 basamaklı float (örn: 12.5) döndür
+    return result if result is not None else 0.0
 
 init_db()
 
@@ -84,18 +94,15 @@ start_mqtt()
 # --- HTML KART OLUŞTURUCU ---
 def generate_html_cards(df):
     cards_html = ""
-    
     for index, row in df.iterrows():
         full_time = row['timestamp']
         date_part = full_time.split(" ")[0]
         time_part = full_time.split(" ")[1]
-        
         try:
             date_obj = datetime.strptime(date_part, '%Y-%m-%d')
             formatted_date = date_obj.strftime('%d/%m/%Y')
         except:
             formatted_date = date_part
-
         count = row['count']
         
         cards_html += f"""
@@ -107,7 +114,6 @@ def generate_html_cards(df):
             <div class="date-info">📅 {formatted_date}</div>
         </div>
         """
-        
     return cards_html
 
 # --- ARAYÜZ ---
@@ -123,12 +129,19 @@ def render_dashboard():
         current_count = int(last_row['count'])
         st.session_state.last_count = current_count
         
-        # 1. Header (Canlı Sayı)
+        # Ortalamayı Hesapla
+        avg_count = get_average_count()
+        
+        # --- HEADER (BAŞLIK + CANLI + ORTALAMA) ---
         with header_placeholder.container():
-            c1, c2 = st.columns([6, 1]) 
+            # Sütunları 3'e böldük: Başlık (Geniş), Canlı (Dar), Ortalama (Dar)
+            c1, c2, c3 = st.columns([5, 1, 1]) 
+            
             with c1:
                 st.title("🔢 Canlı Veri Akışı")
+            
             with c2:
+                # MAVİ KUTU (Canlı)
                 st.markdown(
                     f"""
                     <div style="
@@ -146,53 +159,53 @@ def render_dashboard():
                     """, 
                     unsafe_allow_html=True
                 )
+
+            with c3:
+                # TURUNCU KUTU (Ortalama)
+                st.markdown(
+                    f"""
+                    <div style="
+                        background-color: #1e1e1e;
+                        border: 2px solid #ff9f1c; /* Turuncu */
+                        border-radius: 10px;
+                        text-align: center;
+                        padding: 10px;
+                        margin-top: 10px;
+                        box-shadow: 0 0 10px rgba(255, 159, 28, 0.3);
+                    ">
+                        <div style="font-size: 12px; color: #aaa; margin-bottom: -5px;">ORTALAMA</div>
+                        <div style="font-size: 42px; font-weight: bold; color: #ff9f1c;">{avg_count:.1f}</div>
+                    </div>
+                    """, 
+                    unsafe_allow_html=True
+                )
         
-        # 2. Kartlar
+        # --- KARTLAR ---
         inner_html = generate_html_cards(df)
         
-        # --- HTML/JS: STICKY SCROLL MANTIĞI EKLENDİ ---
         full_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <style>
                 body {{ margin: 0; background-color: #0e1117; font-family: 'Segoe UI', sans-serif; }}
-                
                 #scroll-container {{
-                    display: flex;
-                    flex-direction: row;
-                    overflow-x: auto;
-                    gap: 15px;
-                    padding: 20px;
-                    padding-bottom: 10px;
-                    opacity: 0;
-                    transition: opacity 0.2s ease-in;
-                    
-                    scrollbar-width: thin;
-                    scrollbar-color: #29b5e8 #1e1e1e;
+                    display: flex; flex-direction: row; overflow-x: auto; gap: 15px; padding: 20px; padding-bottom: 10px;
+                    opacity: 0; transition: opacity 0.2s ease-in;
+                    scrollbar-width: thin; scrollbar-color: #29b5e8 #1e1e1e;
                 }}
-                
                 #scroll-container::-webkit-scrollbar {{ height: 10px; }}
                 #scroll-container::-webkit-scrollbar-track {{ background: #1e1e1e; border-radius: 5px; }}
                 #scroll-container::-webkit-scrollbar-thumb {{ background: #444; border-radius: 5px; }}
                 #scroll-container::-webkit-scrollbar-thumb:hover {{ background: #29b5e8; }}
 
                 .card {{
-                    background: linear-gradient(145deg, #1e1e1e, #252525);
-                    min-width: 140px;
-                    max-width: 140px;
-                    border: 1px solid #333;
-                    border-radius: 12px;
-                    padding: 15px;
-                    text-align: center;
-                    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-                    color: white;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: space-between;
+                    background: linear-gradient(145deg, #1e1e1e, #252525); min-width: 140px; max-width: 140px;
+                    border: 1px solid #333; border-radius: 12px; padding: 15px; text-align: center;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.3); color: white;
+                    display: flex; flex-direction: column; justify-content: space-between;
                 }}
                 .card:hover {{ transform: translateY(-3px); border-color: #29b5e8; }}
-                
                 .card-header {{ font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }}
                 .count-value {{ font-size: 36px; font-weight: bold; color: #29b5e8; margin: 5px 0; }}
                 .divider {{ height: 1px; background: #444; margin: 10px 0; width: 100%; }}
@@ -204,51 +217,35 @@ def render_dashboard():
             <div id="scroll-container">
                 {inner_html}
             </div>
-
             <script>
                 var container = document.getElementById('scroll-container');
-                
-                var posKey = "scrollPos_Sticky_v1";
-                var endKey = "isAtEnd_Sticky_v1"; // "Kullanıcı en sonda mı?" bilgisi
+                var posKey = "scrollPos_Sticky_v2";
+                var endKey = "isAtEnd_Sticky_v2"; 
 
-                // --- 1. KONUMU GERİ YÜKLE ---
                 var wasAtEnd = sessionStorage.getItem(endKey);
                 var savedPos = sessionStorage.getItem(posKey);
                 
                 if (wasAtEnd === "true" || wasAtEnd === null) {{
-                    // Eğer kullanıcı daha önce EN SONDA ise (veya ilk girişse)
-                    // Onu yeni eklenen verinin olduğu en sağa götür.
                     container.scrollLeft = container.scrollWidth;
                 }} else {{
-                    // Kullanıcı geçmişe bakıyordu, olduğu yerde bırak.
                     container.scrollLeft = parseInt(savedPos);
                 }}
 
-                // --- 2. GÖRÜNÜR YAP ---
                 requestAnimationFrame(function() {{
                     container.style.opacity = "1";
                 }});
 
-                // --- 3. DİNLE VE KAYDET ---
                 container.addEventListener("scroll", function() {{
-                    // Mevcut konumu kaydet
                     sessionStorage.setItem(posKey, container.scrollLeft);
-                    
-                    // Hesaplama: Kullanıcı en sağa çok yakın mı? (Tolerans 10px)
-                    // scrollLeft + clientWidth = Görünen alanın sağ ucu
                     var atEnd = (container.scrollLeft + container.clientWidth >= container.scrollWidth - 10);
-                    
-                    // Durumu kaydet ("true" veya "false")
                     sessionStorage.setItem(endKey, atEnd);
                 }});
             </script>
         </body>
         </html>
         """
-        
         with timeline_placeholder.container():
             components.html(full_html, height=240)
-            
     else:
         info_box.info("Henüz veri yok. Bekleniyor...")
 
