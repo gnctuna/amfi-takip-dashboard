@@ -12,10 +12,9 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     try:
-        # ttl=0: Her seferinde güncel veriyi çek
+        # ttl=0: Her seferinde güncel veriyi çek (Cache kapalı)
         df = conn.read(worksheet="Sheet1", ttl=0)
         
-        # Tarih formatını düzelt
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         
         # Veriyi önce YENİDEN ESKİYE sırala (ki en son gelenleri alabilelim)
@@ -28,7 +27,7 @@ def get_data():
 # --- HTML KART OLUŞTURUCU ---
 def generate_html_cards(df):
     cards_html = ""
-    # Dataframe buraya "Eskiden -> Yeniye" sıralı gelecek
+    # Dataframe buraya "Eskiden -> Yeniye" sıralı gelecek (Sağa doğru akış için)
     for index, row in df.iterrows():
         ts = row['timestamp']
         date_part = ts.strftime('%d/%m/%Y')
@@ -56,17 +55,16 @@ def render_dashboard():
         # Otomatik Yenileme Anahtarı
         auto_refresh = st.toggle('🔴 Canlı İzle (Oto-Yenile)', value=True)
 
-    # Veriyi Çek (En Yeniler En Üstte)
+    # Veriyi Çek
     df = get_data()
 
     if not df.empty:
-        # 1. Büyük Kutular İçin: En son gelen veriyi al (Listenin başı)
+        # 1. Büyük Kutular: En son gelen veriyi al
         last_row = df.iloc[0] 
         current_count = int(last_row['count'])
         avg_count = df['count'].mean()
         
-        # 2. Kartlar İçin: Son 50 veriyi al, ama TERS ÇEVİR (Eskiden Yeniye)
-        # Böylece en yeni veri EN SAĞDA olur.
+        # 2. Kartlar: Son 50 veri, Eskiden -> Yeniye sıralı (En yeni en sağda)
         df_cards = df.head(50).sort_values(by='timestamp', ascending=True)
 
         # --- İSTATİSTİK KUTULARI ---
@@ -114,8 +112,7 @@ def render_dashboard():
         
         inner_html = generate_html_cards(df_cards)
         
-        # Javascript ekledik: "container.scrollLeft = container.scrollWidth"
-        # Bu kod, sayfa yüklendiğinde çubuğu en sona (en sağa) iter.
+        # --- JAVASCRIPT: AKILLI KAYDIRMA MANTIĞI ---
         full_html = f"""
         <!DOCTYPE html>
         <html>
@@ -125,7 +122,6 @@ def render_dashboard():
                 #scroll-container {{
                     display: flex; flex-direction: row; overflow-x: auto; gap: 15px; padding: 20px; padding-bottom: 10px;
                     scrollbar-width: thin; scrollbar-color: #29b5e8 #1e1e1e;
-                    scroll-behavior: smooth; /* Yumuşak kaydırma */
                 }}
                 #scroll-container::-webkit-scrollbar {{ height: 8px; }}
                 #scroll-container::-webkit-scrollbar-track {{ background: #1e1e1e; border-radius: 4px; }}
@@ -152,9 +148,34 @@ def render_dashboard():
                 {inner_html}
             </div>
             <script>
-                // Sayfa yüklendiğinde en sağa (son veriye) git
                 var container = document.getElementById('scroll-container');
-                container.scrollLeft = container.scrollWidth;
+                var posKey = "scrollPos_V3";
+                var endKey = "isAtEnd_V3"; 
+
+                // 1. Önceki durumu oku (En sonda mıydı?)
+                var wasAtEnd = sessionStorage.getItem(endKey);
+                var savedPos = sessionStorage.getItem(posKey);
+                
+                // 2. POZİSYON AYARLAMA
+                // Eğer daha önce "en sağda" idiyse (wasAtEnd === "true")
+                // VEYA ilk kez giriyorsa (wasAtEnd === null)
+                // -> Scroll'u tekrar EN SONA (yeni oluşan en sağa) at.
+                if (wasAtEnd === "true" || wasAtEnd === null) {{
+                    container.scrollLeft = container.scrollWidth;
+                }} else {{
+                    // Değilse, kullanıcının bıraktığı pikselde kal.
+                    container.scrollLeft = parseInt(savedPos);
+                }}
+
+                // 3. KULLANICI HAREKETİNİ DİNLE
+                container.addEventListener("scroll", function() {{
+                    sessionStorage.setItem(posKey, container.scrollLeft);
+                    
+                    // Kullanıcı şu an en sağa yakın mı? (20px tolerans)
+                    // Eğer en sağdaysa "true" kaydet, değilse "false" kaydet.
+                    var atEnd = (container.scrollLeft + container.clientWidth >= container.scrollWidth - 20);
+                    sessionStorage.setItem(endKey, atEnd);
+                }});
             </script>
         </body>
         </html>
@@ -164,7 +185,7 @@ def render_dashboard():
     else:
         st.info("Henüz veri yok. Kamera sistemini çalıştırarak veri gönderin.")
 
-    # Otomatik Yenileme
+    # Otomatik Yenileme (5 Saniye)
     if auto_refresh:
         time.sleep(5)
         st.rerun()
