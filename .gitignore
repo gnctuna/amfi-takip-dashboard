@@ -14,3 +14,7 @@ __pycache__/
 .env
 venv/
 .DS_Store
+secrets.json
+__pycache__/
+.streamlit/
+*.pt
