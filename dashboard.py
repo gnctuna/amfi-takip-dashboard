@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import streamlit.components.v1 as components
-from datetime import datetime
+import time  # Zamanlayıcı için gerekli
 
 # --- AYARLAR ---
 st.set_page_config(page_title="Canlı Takip Şeridi", layout="wide", page_icon="🔢")
@@ -12,8 +12,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     try:
-        # --- KRİTİK GÜNCELLEME: ttl=0 ---
-        # Bu ayar önbelleği kapatır ve her seferinde güncel veriyi çeker
+        # ttl=0: Önbelleği kapatır, her seferinde Google'dan taze veri çeker
         df = conn.read(worksheet="Sheet1", ttl=0)
         
         # Tarih formatını düzelt ve sırala
@@ -47,15 +46,16 @@ def generate_html_cards(df):
 
 # --- ARAYÜZ ---
 def render_dashboard():
-    df = get_data()
-    
-    # Başlık ve Yenileme Butonu
-    c1, c2 = st.columns([6, 1])
+    # Başlık Alanı
+    c1, c2 = st.columns([6, 2])
     with c1:
         st.title("🔢 Canlı Veri Akışı")
     with c2:
-        if st.button("🔄 Yenile"):
-            st.rerun()
+        # Otomatik Yenileme Anahtarı (Varsayılan: Açık)
+        auto_refresh = st.toggle('🔴 Canlı İzle (Oto-Yenile)', value=True)
+
+    # Veriyi Çek
+    df = get_data()
 
     if not df.empty:
         last_row = df.iloc[0] # En güncel veri
@@ -106,7 +106,7 @@ def render_dashboard():
             )
         
         # --- YATAY KAYDIRMALI KARTLAR ---
-        st.write("") # Boşluk
+        st.write("") 
         st.markdown("### 📜 Geçmiş Kayıtlar")
         
         inner_html = generate_html_cards(df)
@@ -149,9 +149,14 @@ def render_dashboard():
         </html>
         """
         components.html(full_html, height=260)
-        
+
     else:
         st.info("Henüz veri yok. Kamera sistemini çalıştırarak veri gönderin.")
+
+    # --- OTOMATİK YENİLEME MANTIĞI ---
+    if auto_refresh:
+        time.sleep(5)  # 5 Saniye bekle
+        st.rerun()     # Sayfayı baştan yükle
 
 if __name__ == "__main__":
     render_dashboard()
