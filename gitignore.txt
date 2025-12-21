@@ -1,0 +1,24 @@
+venv/
+__pycache__/
+*.pt
+*.mp4
+dataset/
+models/
+gereksizler kısmı/
+.DS_Store
+history_v2.csv
+
+# Python gereksiz dosyaları
+__pycache__/
+*.pyc
+
+# Sanal ortam (Zaten var ama garanti olsun)
+venv/
+.venv/
+
+# Ağır YOLO Modelleri (Bunları Pi kendisi indirir)
+*.pt
+*.onnx
+
+# Mac sistem dosyaları
+.DS_Store
