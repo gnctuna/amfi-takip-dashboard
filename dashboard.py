@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import streamlit.components.v1 as components
-import time  # Zamanlayıcı için gerekli
+import time
 
 # --- AYARLAR ---
 st.set_page_config(page_title="Canlı Takip Şeridi", layout="wide", page_icon="🔢")
@@ -12,12 +12,14 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     try:
-        # ttl=0: Önbelleği kapatır, her seferinde Google'dan taze veri çeker
+        # ttl=0: Her seferinde güncel veriyi çek
         df = conn.read(worksheet="Sheet1", ttl=0)
         
-        # Tarih formatını düzelt ve sırala
+        # Tarih formatını düzelt
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values(by='timestamp', ascending=False) # En yeni en üstte
+        
+        # Veriyi önce YENİDEN ESKİYE sırala (ki en son gelenleri alabilelim)
+        df = df.sort_values(by='timestamp', ascending=False)
         return df
     except Exception as e:
         st.error(f"Veri çekme hatası: {e}")
@@ -26,8 +28,8 @@ def get_data():
 # --- HTML KART OLUŞTURUCU ---
 def generate_html_cards(df):
     cards_html = ""
-    # Sadece son 50 veriyi gösterelim ki sayfa donmasın
-    for index, row in df.head(50).iterrows():
+    # Dataframe buraya "Eskiden -> Yeniye" sıralı gelecek
+    for index, row in df.iterrows():
         ts = row['timestamp']
         date_part = ts.strftime('%d/%m/%Y')
         time_part = ts.strftime('%H:%M:%S')
@@ -51,24 +53,26 @@ def render_dashboard():
     with c1:
         st.title("🔢 Canlı Veri Akışı")
     with c2:
-        # Otomatik Yenileme Anahtarı (Varsayılan: Açık)
+        # Otomatik Yenileme Anahtarı
         auto_refresh = st.toggle('🔴 Canlı İzle (Oto-Yenile)', value=True)
 
-    # Veriyi Çek
+    # Veriyi Çek (En Yeniler En Üstte)
     df = get_data()
 
     if not df.empty:
-        last_row = df.iloc[0] # En güncel veri
+        # 1. Büyük Kutular İçin: En son gelen veriyi al (Listenin başı)
+        last_row = df.iloc[0] 
         current_count = int(last_row['count'])
-        
-        # Ortalamayı Hesapla
         avg_count = df['count'].mean()
         
+        # 2. Kartlar İçin: Son 50 veriyi al, ama TERS ÇEVİR (Eskiden Yeniye)
+        # Böylece en yeni veri EN SAĞDA olur.
+        df_cards = df.head(50).sort_values(by='timestamp', ascending=True)
+
         # --- İSTATİSTİK KUTULARI ---
         c_stat1, c_stat2, c_space = st.columns([1, 1, 4])
         
         with c_stat1:
-            # MAVİ KUTU (Canlı)
             st.markdown(
                 f"""
                 <div style="
@@ -87,7 +91,6 @@ def render_dashboard():
             )
 
         with c_stat2:
-            # TURUNCU KUTU (Ortalama)
             st.markdown(
                 f"""
                 <div style="
@@ -107,10 +110,12 @@ def render_dashboard():
         
         # --- YATAY KAYDIRMALI KARTLAR ---
         st.write("") 
-        st.markdown("### 📜 Geçmiş Kayıtlar")
+        st.markdown("### 📜 Geçmiş Kayıtlar (Sola Doğru Eski)")
         
-        inner_html = generate_html_cards(df)
+        inner_html = generate_html_cards(df_cards)
         
+        # Javascript ekledik: "container.scrollLeft = container.scrollWidth"
+        # Bu kod, sayfa yüklendiğinde çubuğu en sona (en sağa) iter.
         full_html = f"""
         <!DOCTYPE html>
         <html>
@@ -120,6 +125,7 @@ def render_dashboard():
                 #scroll-container {{
                     display: flex; flex-direction: row; overflow-x: auto; gap: 15px; padding: 20px; padding-bottom: 10px;
                     scrollbar-width: thin; scrollbar-color: #29b5e8 #1e1e1e;
+                    scroll-behavior: smooth; /* Yumuşak kaydırma */
                 }}
                 #scroll-container::-webkit-scrollbar {{ height: 8px; }}
                 #scroll-container::-webkit-scrollbar-track {{ background: #1e1e1e; border-radius: 4px; }}
@@ -145,6 +151,11 @@ def render_dashboard():
             <div id="scroll-container">
                 {inner_html}
             </div>
+            <script>
+                // Sayfa yüklendiğinde en sağa (son veriye) git
+                var container = document.getElementById('scroll-container');
+                container.scrollLeft = container.scrollWidth;
+            </script>
         </body>
         </html>
         """
@@ -153,10 +164,10 @@ def render_dashboard():
     else:
         st.info("Henüz veri yok. Kamera sistemini çalıştırarak veri gönderin.")
 
-    # --- OTOMATİK YENİLEME MANTIĞI ---
+    # Otomatik Yenileme
     if auto_refresh:
-        time.sleep(5)  # 5 Saniye bekle
-        st.rerun()     # Sayfayı baştan yükle
+        time.sleep(5)
+        st.rerun()
 
 if __name__ == "__main__":
     render_dashboard()
