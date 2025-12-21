@@ -12,8 +12,10 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     try:
-        # Veriyi Google Sheets'ten çek
-        df = conn.read(worksheet="Sheet1")
+        # --- KRİTİK GÜNCELLEME: ttl=0 ---
+        # Bu ayar önbelleği kapatır ve her seferinde güncel veriyi çeker
+        df = conn.read(worksheet="Sheet1", ttl=0)
+        
         # Tarih formatını düzelt ve sırala
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df = df.sort_values(by='timestamp', ascending=False) # En yeni en üstte
@@ -22,7 +24,7 @@ def get_data():
         st.error(f"Veri çekme hatası: {e}")
         return pd.DataFrame()
 
-# --- HTML KART OLUŞTURUCU (Senin Tasarımın) ---
+# --- HTML KART OLUŞTURUCU ---
 def generate_html_cards(df):
     cards_html = ""
     # Sadece son 50 veriyi gösterelim ki sayfa donmasın
@@ -56,13 +58,13 @@ def render_dashboard():
             st.rerun()
 
     if not df.empty:
-        last_row = df.iloc[0] # En güncel veri (sıraladığımız için ilk satır)
+        last_row = df.iloc[0] # En güncel veri
         current_count = int(last_row['count'])
         
         # Ortalamayı Hesapla
         avg_count = df['count'].mean()
         
-        # --- İSTATİSTİK KUTULARI (Senin Mavi/Turuncu Tasarımın) ---
+        # --- İSTATİSTİK KUTULARI ---
         c_stat1, c_stat2, c_space = st.columns([1, 1, 4])
         
         with c_stat1:
@@ -104,7 +106,7 @@ def render_dashboard():
             )
         
         # --- YATAY KAYDIRMALI KARTLAR ---
-        st.write("") # Biraz boşluk
+        st.write("") # Boşluk
         st.markdown("### 📜 Geçmiş Kayıtlar")
         
         inner_html = generate_html_cards(df)
@@ -119,7 +121,6 @@ def render_dashboard():
                     display: flex; flex-direction: row; overflow-x: auto; gap: 15px; padding: 20px; padding-bottom: 10px;
                     scrollbar-width: thin; scrollbar-color: #29b5e8 #1e1e1e;
                 }}
-                /* Scrollbar Tasarımı */
                 #scroll-container::-webkit-scrollbar {{ height: 8px; }}
                 #scroll-container::-webkit-scrollbar-track {{ background: #1e1e1e; border-radius: 4px; }}
                 #scroll-container::-webkit-scrollbar-thumb {{ background: #444; border-radius: 4px; }}
@@ -147,7 +148,6 @@ def render_dashboard():
         </body>
         </html>
         """
-        # HTML'i sayfaya gömüyoruz (Kaydırma çubuğu çalışsın diye height ayarlı)
         components.html(full_html, height=260)
         
     else:
