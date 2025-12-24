@@ -9,19 +9,24 @@ import os
 from datetime import datetime
 
 # ==========================================
-#               AYARLAR
+#      AYARLAR (YÜKSEK DOĞRULUK MODU)
 # ==========================================
 SERVICE_ACCOUNT_FILE = 'secrets.json'
 SHEET_ID = '1YgVkVyMa_TbhgccfUMsfFtbtKrS5glorha1rGHMK1Kk'
 BACKUP_FILE = 'offline_backup.csv'
 
-# Raspberry Pi için Optimize Edilmiş Modeller
-MODEL_AMFI = "yolov8l.pt"  # Large (Çok Hassas)
-MODEL_SINIF = "yolov8m.pt" # Medium (Dengeli)
+# 🔥 MODEL SEÇİMİ (YOLO11)
+# Raspberry Pi 5 için optimize edilmiş en yeni modeller
+MODEL_AMFI = "yolo11l.pt"  # Large (Amfi için maksimum detay)
+MODEL_SINIF = "yolo11m.pt" # Medium (Sınıf için ideal denge)
 
-# Algılama Hassasiyeti
-CONFIDENCE_THRESHOLD = 0.40
-IOU_THRESHOLD = 0.50
+# 🎯 HASSASİYET AYARLARI
+# %60 altındaki tahminleri "İnsan" sayma (Yanlış alarmları önler)
+CONFIDENCE_THRESHOLD = 0.60  
+# Kutucukların birbirine karışmasını engeller (Daha iyi ayırır)
+IOU_THRESHOLD = 0.45
+# Analiz Çözünürlüğü (Yüksek kalite = Uzaktakileri daha iyi görür)
+IMAGE_SIZE = 1280
 
 # Bekleme Süreleri (Saniye)
 INTERVAL_AMFI = 60
@@ -62,13 +67,11 @@ def process_offline_queue(sheet):
         for line in lines:
             data = line.strip().split(',')
             if len(data) == 4:
-                # Veriyi hazırla ve gönder
                 row = [data[0], int(data[1]), data[2], data[3]]
                 sheet.append_row(row)
-                print(f"   ⬆️ Eski veri yüklendi: {row[0]} - {row[1]} Kişi")
+                print(f"   ⬆️ Eski veri yüklendi: {row[0]}")
                 time.sleep(1) # API limitine takılmamak için bekle
         
-        # İşlem bitince dosyayı sil
         os.remove(BACKUP_FILE)
         print("✅ Tüm yedekler başarıyla yüklendi ve temizlendi.")
         
@@ -79,7 +82,6 @@ def save_to_cloud(sheet, count, status, mode):
     """Veriyi buluta atmayı dener, olmazsa yedeğe atar."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Eğer sheet bağlantısı kopuksa direkt yedekle
     if sheet is None:
         save_local_backup(timestamp, count, status, mode)
         return
@@ -91,41 +93,56 @@ def save_to_cloud(sheet, count, status, mode):
         print(f"⚠️ Bulut Yazma Hatası: {e}")
         save_local_backup(timestamp, count, status, mode)
 
-def get_accurate_count(cap, model, num_samples=3):
+def get_accurate_count(cap, model, mode_name, num_samples=3):
     """
-    3 kez fotoğraf çeker, analiz eder ve medyanını alır.
-    Mac'te pencere açar, Pi'de (Headless) hata vermeden devam eder.
+    TTA (Augmentation) açık, yüksek çözünürlüklü analiz yapar.
+    Pi 5'te biraz daha yavaş çalışır ama çok daha doğru sonuç verir.
     """
     counts = []
-    print("👀 Analiz yapılıyor (3 Örnek)...")
+    print(f"👀 {mode_name} Modu: Derinlemesine Analiz (TTA Aktif - %{int(CONFIDENCE_THRESHOLD*100)}+)...")
     
     for i in range(num_samples):
-        # Buffer temizle (Eski kare kalmasın)
+        # Buffer temizle (Kameradaki eski görüntüyü at)
         for _ in range(5): cap.read()
         success, frame = cap.read()
         
         if not success: continue
 
-        # Tahmin Yap
-        results = model.predict(frame, classes=0, conf=CONFIDENCE_THRESHOLD, iou=IOU_THRESHOLD, verbose=False)
+        # --- YÜKSEK DOĞRULUK TAHMİNİ ---
+        # augment=True: Fotoğrafı çevirip tekrar bakar.
+        # imgsz=IMAGE_SIZE: Büyük boyutta işler.
+        results = model.predict(
+            frame, 
+            classes=0, 
+            conf=CONFIDENCE_THRESHOLD, 
+            iou=IOU_THRESHOLD, 
+            imgsz=IMAGE_SIZE, 
+            augment=True, 
+            verbose=False
+        )
+        # -------------------------------
+        
         cnt = len(results[0].boxes)
         
-        # --- GÖRSELLEŞTİRME (OPSİYONEL PENCERE) ---
+        # Görselleştirme (Pi'de ekran yoksa hata vermez)
         try:
             annotated_frame = results[0].plot()
-            cv2.putText(annotated_frame, f"Ornek {i+1}/{num_samples} - Sayi: {cnt}", (20, 50), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.imshow("KAMERA TESTI (Mac/PC)", annotated_frame)
-            cv2.waitKey(2000) # 2 saniye ekranda tut
+            info_text = f"MOD: {mode_name} (v11-Pro) | Ornek {i+1}/{num_samples} | Sayi: {cnt}"
+            
+            # Yazıyı ekrana bas
+            cv2.putText(annotated_frame, info_text, (20, 50), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Pencereyi göster
+            cv2.imshow(f"KAMERA - {mode_name}", annotated_frame)
+            cv2.waitKey(2000) 
         except:
-            # Raspberry Pi monitörsüz çalışıyorsa burayı sessizce geç
             pass
-        # ------------------------------------------
 
         counts.append(cnt)
         print(f"   📸 Örnek {i+1}: {cnt} Kişi")
         
-    # Pencereleri kapat (Hata verirse geç)
+    # Pencereleri temizle
     try:
         cv2.destroyAllWindows()
     except:
@@ -141,8 +158,9 @@ def main():
     else:
         SCENARIO = "SINIF"
 
-    print(f"🚀 SİSTEM BAŞLATILIYOR: {SCENARIO} MODU")
+    print(f"🚀 SİSTEM BAŞLATILIYOR: {SCENARIO} MODU (PRO VERSİYON)")
     print(f"🛡️  Offline Yedekleme: AKTİF")
+    print(f"🧠  Yapay Zeka: YOLO11 (Confidence > {CONFIDENCE_THRESHOLD})")
 
     # Ayarları Yükle
     if SCENARIO == "AMFI":
@@ -152,12 +170,12 @@ def main():
         model_name = MODEL_SINIF
         sleep_time = INTERVAL_SINIF
 
-    # Modeli Hazırla
-    print(f"⏳ Yapay Zeka Modeli Yükleniyor ({model_name})...")
+    print(f"⏳ Model Yükleniyor ({model_name})...")
     try:
         model = YOLO(model_name)
     except Exception as e:
-        print(f"❌ Kritik Hata (Model Yüklenemedi): {e}")
+        print(f"❌ Model Hatası: {e}")
+        print("💡 İPUCU: 'pip install ultralytics --upgrade' komutunu çalıştırdın mı?")
         return
 
     # Başlangıç Bağlantısı
@@ -165,36 +183,35 @@ def main():
     last_sent_count = -1
 
     while True:
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Yeni Döngü Başlıyor...")
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Döngü Başlıyor...")
 
-        # 1. BAĞLANTI KONTROLÜ VE ESKİ YEDEKLER
+        # 1. BAĞLANTI KONTROLÜ
         if sheet is None:
             print("🔄 İnternet bağlantısı tekrar deneniyor...")
             sheet = connect_gsheets()
         
-        # Bağlantı varsa, önce birikmiş borçları öde (Dosyaları yükle)
         if sheet is not None:
             process_offline_queue(sheet)
 
-        # 2. KAMERA VE SAYIM İŞLEMİ
+        # 2. KAMERA VE SAYIM
         cap = cv2.VideoCapture(0)
-        if not cap.isOpened(): cap = cv2.VideoCapture(1) # Mac için alternatif port
+        # Kamera 0 açılmazsa 1'i dene (Mac veya Harici Kamera için)
+        if not cap.isOpened(): cap = cv2.VideoCapture(1) 
 
         if cap and cap.isOpened():
-            # Yüksek çözünürlük ayarla
+            # Kamerayı maksimum çözünürlüğe zorla
             cap.set(3, 1280)
             cap.set(4, 720)
             
-            # 3 Fotoğraflı Hassas Sayım
-            final_count = get_accurate_count(cap, model, num_samples=3)
-            cap.release() # Kamerayı kapat (Isınmayı önle)
+            final_count = get_accurate_count(cap, model, SCENARIO, num_samples=3)
+            cap.release()
             
             status = "Kalabalik" if final_count > 20 else "Normal"
-            mode_label = f"{SCENARIO}_AUTO"
+            mode_label = f"{SCENARIO}_PRO" # Google Sheet'te 'PRO' etiketiyle göreceksin
             
             print(f"✅ FİNAL SONUÇ: {final_count} Kişi")
 
-            # 3. VERİ GÖNDERİM KARARI
+            # 3. VERİ GÖNDERİMİ
             if final_count != last_sent_count:
                 save_to_cloud(sheet, final_count, status, mode_label)
                 last_sent_count = final_count
@@ -204,7 +221,6 @@ def main():
         else:
             print("❌ Kamera açılamadı! Kabloyu kontrol et.")
 
-        # 4. BEKLEME (SOĞUMA) SÜRESİ
         print(f"⏳ Bekleniyor ({sleep_time} saniye)...")
         time.sleep(sleep_time)
 
