@@ -151,41 +151,72 @@ def get_accurate_count(cap, model, mode_name, num_samples=3):
     if not counts: return 0
     return int(np.median(counts))
 
+# --- BU FONKSİYONU MAIN'İN ÜSTÜNE EKLEMEN GEREKİYORDU ---
+def get_cpu_temp():
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+            temp = int(f.read()) / 1000.0
+        return temp
+    except:
+        return 0.0
+# --------------------------------------------------------
+
 def main():
-    # Komut satırından mod seçimi (Varsayılan: SINIF)
-    if len(sys.argv) > 1:
+    # ==========================================
+    # 🛠️ GENEL AYARLAR
+    # ==========================================
+    TEST_MODU = True   # True = Kaydeder, False = Siler
+    # ==========================================
+
+    print("🚀 Sistem Hazırlanıyor...")
+
+    # 1. SENARYO VE MOD AYARLARI
+    try:
         SCENARIO = sys.argv[1].upper()
-    else:
+    except:
         SCENARIO = "SINIF"
 
-    print(f"🚀 SİSTEM BAŞLATILIYOR: {SCENARIO} MODU (PRO VERSİYON)")
-    print(f"🛡️  Offline Yedekleme: AKTİF")
-    print(f"🧠  Yapay Zeka: YOLO11 (Confidence > {CONFIDENCE_THRESHOLD})")
-
-    # Ayarları Yükle
+    # --- MODLARA GÖRE AYARLAR ---
     if SCENARIO == "AMFI":
-        model_name = MODEL_AMFI
-        sleep_time = INTERVAL_AMFI
+        # AMFİ MODU: Large Model, Az Fotoğraf, Çok Bekleme
+        model_name = 'yolo11l.pt'  # Large Model
+        num_samples = 3            # 3 Fotoğraf
+        sleep_time = 60            # 60 Saniye Dinlenme
+        conf_rate = 0.50           # Geniş açı hassasiyeti
+        print(f"🏟️ MOD: AMFİ (Model: LARGE | 3 Foto | 60sn | Geniş Açı)")
+    
     else:
-        model_name = MODEL_SINIF
-        sleep_time = INTERVAL_SINIF
+        # SINIF MODU: Medium Model, Çok Fotoğraf, Hızlı Bekleme
+        model_name = 'yolo11m.pt'  # Medium Model
+        num_samples = 5            # 5 Fotoğraf
+        sleep_time = 30            # 30 Saniye Dinlenme
+        conf_rate = 0.60           # Standart hassasiyet
+        print(f"🏫 MOD: SINIF (Model: MEDIUM | 5 Foto | 30sn | Standart)")
 
-    print(f"⏳ Model Yükleniyor ({model_name})...")
-    try:
-        model = YOLO(model_name)
-    except Exception as e:
-        print(f"❌ Model Hatası: {e}")
-        print("💡 İPUCU: 'pip install ultralytics --upgrade' komutunu çalıştırdın mı?")
-        return
+    # ----------------------------------------------------
 
-    # Başlangıç Bağlantısı
+    if TEST_MODU and not os.path.exists("fotograflar"):
+        os.makedirs("fotograflar")
+    elif not TEST_MODU:
+        print("🛡️ GİZLİLİK MODU AÇIK: Fotoğraflar silinecek.")
+
+    print(f"🧠 Yapay Zeka Yükleniyor: {model_name} ...")
+    model = YOLO(model_name)
+
     sheet = connect_gsheets()
     last_sent_count = -1
 
-    while True:
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Döngü Başlıyor...")
+    print(f"✅ Sistem Hazır. Başlıyoruz...")
 
-        # 1. BAĞLANTI KONTROLÜ
+    while True:
+        # CPU Sıcaklığı (Artık bu fonksiyon tanımlı olduğu için hata vermez)
+        cpu_temp = get_cpu_temp()
+        temp_icon = "🔥" if cpu_temp > 75 else "🌡️"
+        temp_status = f"{temp_icon} {cpu_temp:.1f}°C"
+        
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Döngü Başlıyor... ({temp_status})")
+
+        # A) BAĞLANTI
         if sheet is None:
             print("🔄 İnternet bağlantısı tekrar deneniyor...")
             sheet = connect_gsheets()
@@ -193,36 +224,67 @@ def main():
         if sheet is not None:
             process_offline_queue(sheet)
 
-        # 2. KAMERA VE SAYIM
-        cap = cv2.VideoCapture(0)
-        # Kamera 0 açılmazsa 1'i dene (Mac veya Harici Kamera için)
-        if not cap.isOpened(): cap = cv2.VideoCapture(1) 
+        # B) FOTOĞRAF VE SAYIM
+        samples = []
+        
+        print(f"📸 {num_samples} fotoğraf çekiliyor...")
 
-        if cap and cap.isOpened():
-            # Kamerayı maksimum çözünürlüğe zorla
-            cap.set(3, 1280)
-            cap.set(4, 720)
+        for i in range(num_samples):
+            if TEST_MODU:
+                dosya_adi = f"foto_{i+1}.jpg"
+                foto_yolu = os.path.join("fotograflar", dosya_adi)
+            else:
+                foto_yolu = "gecici_foto.jpg"
             
-            final_count = get_accurate_count(cap, model, SCENARIO, num_samples=3)
-            cap.release()
+            # Fotoğraf Çek
+            os.system(f"rpicam-still -o {foto_yolu} -t 200 --width 1920 --height 1080 -n")
             
+            frame = cv2.imread(foto_yolu)
+            
+            # Gizlilik: Okur okumaz sil (Test kapalıysa)
+            if not TEST_MODU and os.path.exists(foto_yolu):
+                os.remove(foto_yolu)
+            
+            if frame is not None:
+                results = model.predict(frame, conf=conf_rate, classes=[0], verbose=False)
+                count = len(results[0].boxes)
+                
+                # Test Modu: Kaydet
+                if TEST_MODU:
+                    cizimli_kare = results[0].plot()
+                    cv2.imwrite(foto_yolu, cizimli_kare)
+                    print(f"   ├─ [Kaydedildi]: {count} Kişi")
+                else:
+                    print(f"   ├─ [Gizli Analiz]: {count} Kişi")
+
+                samples.append((count, results[0]))
+            else:
+                print(f"   ├─ ❌ Okunamadı")
+
+        # C) SONUÇ
+        if samples:
+            samples.sort(key=lambda x: x[0])
+            median_index = len(samples) // 2
+            final_count, final_results = samples[median_index]
+            
+            cpu_temp_final = get_cpu_temp()
             status = "Kalabalik" if final_count > 20 else "Normal"
-            mode_label = f"{SCENARIO}_PRO" # Google Sheet'te 'PRO' etiketiyle göreceksin
-            
-            print(f"✅ FİNAL SONUÇ: {final_count} Kişi")
+            mode_label = f"{SCENARIO}_DETAYLI"
 
-            # 3. VERİ GÖNDERİMİ
+            print(f"✅ SONUÇ: {final_count} Kişi | {status} | CPU: {cpu_temp_final:.1f}°C")
+
+            # D) VERİ GÖNDERİMİ
             if final_count != last_sent_count:
                 save_to_cloud(sheet, final_count, status, mode_label)
                 last_sent_count = final_count
             else:
-                print("💤 Sayı değişmedi, veri gönderilmiyor.")
-
+                print(f"💤 Sayı değişmedi.")
+        
         else:
-            print("❌ Kamera açılamadı! Kabloyu kontrol et.")
+            print("❌ Hiçbir fotoğraf analiz edilemedi!")
 
+        # E) BEKLEME
         print(f"⏳ Bekleniyor ({sleep_time} saniye)...")
         time.sleep(sleep_time)
-
 if __name__ == "__main__":
     main()

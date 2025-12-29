@@ -18,3 +18,11 @@ secrets.json
 __pycache__/
 .streamlit/
 *.pt
+
+
+secrets.json
+venv/
+__pycache__/
+fotograflar/
+*.jpg
+offline_data.json
